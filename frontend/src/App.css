@@ -1,0 +1,209 @@
+:root {
+  --ink: #16241e;
+  --paper: #f6f3ec;
+  --forest: #2f6f4f;
+  --forest-dark: #234f39;
+  --clay: #c96f4a;
+  --line: #dcd6c8;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+#root { min-height: 100vh; }
+
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem 2rem;
+  background: var(--forest-dark);
+  color: white;
+}
+
+.navbar a {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  font-weight: 500;
+}
+.navbar a.active,
+.navbar a:hover { color: white; }
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-right: 1rem;
+}
+
+.nav-spacer { flex: 1; }
+
+.link-button {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: white;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.page h1 { margin-bottom: 0.25rem; }
+.page-subtitle { color: #5a6b60; margin-top: 0; }
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+button {
+  background: var(--forest);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover { background: var(--forest-dark); }
+button:disabled { opacity: 0.6; cursor: default; }
+
+.auth-page {
+  min-height: calc(100vh - 0px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.auth-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+input, select {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.auth-switch { font-size: 0.85rem; text-align: center; }
+.form-error { color: #b3432c; font-size: 0.85rem; margin: 0; }
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.stat-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.stat-card.good .stat-value { color: var(--forest); }
+.stat-card.bad .stat-value { color: var(--clay); }
+.stat-label { font-size: 0.8rem; color: #667a6d; }
+.stat-value { font-size: 1.5rem; font-weight: 700; }
+
+.chart-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.receipt-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 1rem; }
+
+.receipt-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+
+.receipt-card-header {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+.receipt-total { margin-left: auto; font-weight: 700; }
+
+.item-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.92rem; }
+
+.category-badge {
+  background: #eef2ee;
+  color: var(--forest-dark);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.75rem;
+}
+.category-badge.impulse { background: #fbe9e2; color: var(--clay); }
+
+.receipt-form {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin: 1.25rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.item-row input { flex: 1; min-width: 120px; }
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.4rem !important;
+}
+
+.empty-state { color: #667a6d; }
