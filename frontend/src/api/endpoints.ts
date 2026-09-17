@@ -78,7 +78,49 @@ export async function deleteReceipt(id: number) {
   await api.delete(`/receipts/${id}/`);
 }
 
+export async function ocrExtract(image: File) {
+  const form = new FormData();
+  form.append('image', image);
+  const { data } = await api.post<{
+    merchant_name: string | null;
+    purchase_date: string | null;
+    total_amount: number | null;
+    items: { name: string; price: number }[];
+    raw_text: string;
+  }>('/receipts/ocr_extract/', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  return data;
+}
+
+export async function attachReceiptImage(receiptId: number, image: File) {
+  const form = new FormData();
+  form.append('receipt_image', image);
+  const { data } = await api.patch<Receipt>(`/receipts/${receiptId}/`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export async function downloadMonthlyAuditPdf(year: number, month: number) {
+  const response = await api.get(`/receipts/monthly_audit_pdf/`, {
+    params: { year, month },
+    responseType: 'blob',
+  });
+  const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `smartspend-audit-${year}-${String(month).padStart(2, '0')}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export async function getMonthlyAnalytics() {
   const { data } = await api.get<MonthlyAnalytics[]>('/receipts/monthly_analytics/');
   return data;
 }
+
+//----------------------------------------------------------------------------------------------------------------------------------------------//
+//now adding the other system architecture and making sire that it renders very well and also authentiocate using a code sent o gmail           //
+//----------------------------------------------------------------------------------------------------------------------------------------------//
+
