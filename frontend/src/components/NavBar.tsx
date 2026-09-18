@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 
 const TABS = [
-  { to: '/', label: 'Dashboard' },
+  { to: '/dashboard', label: 'Dashboard' },
   { to: '/receipts', label: 'Receipts' },
   { to: '/settings', label: 'Settings' },
 ];
@@ -17,7 +17,7 @@ export default function NavBar() {
   const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
 
   useLayoutEffect(() => {
-    const active = TABS.find((t) => (t.to === '/' ? location.pathname === '/' : location.pathname.startsWith(t.to)));
+    const active = TABS.find((t) => location.pathname.startsWith(t.to));
     const el = active ? linkRefs.current[active.to] : null;
     if (el) {
       setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
@@ -59,7 +59,7 @@ export default function NavBar() {
         className="link-button"
         onClick={() => {
           logout();
-          navigate('/login');
+          navigate('/');
         }}
       >
         Log out

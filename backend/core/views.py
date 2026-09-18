@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
@@ -28,15 +29,55 @@ from .serializers import (
     ReceiptSerializer,
     RegisterSerializer,
     RequestLoginCodeSerializer,
+    RequestSmsCodeSerializer,
     StoreSerializer,
     UserSerializer,
     VerifyLoginCodeSerializer,
+    VerifySmsCodeSerializer,
 )
+from .sms import send_login_code_sms
 
 User = get_user_model()
 
 LOGIN_CODE_TTL_MINUTES = 10
 LOGIN_CODE_MAX_ATTEMPTS = 5
+
+
+def _deliver_login_code(code: LoginCode, channel: str) -> str | None:
+    """Deliver a LoginCode to its email address or phone number.
+
+    Returns the transport name ('resend' / 'telnyx') when delivered for
+    real, or None when no provider key is configured — in which case the
+    code rides back to the client as dev_code so passwordless login stays
+    testable with zero configuration. Raises on provider errors so callers
+    can return a clean 502.
+    """
+    if channel == 'sms':
+        if not getattr(settings, 'TELNYX_API_KEY', ''):
+            return None  # dev mode: no SMS provider configured
+        return send_login_code_sms(code.email, code.code)
+    transport = send_login_code_email(code.email, code.code)
+    return None if transport == 'console' else transport
+
+
+def _create_login_code(destination: str, request) -> LoginCode | None:
+    """Create a rate-limited login code for an email address or phone
+    number (both live in LoginCode.email). Returns None when the
+    per-destination hourly limit is hit so callers can return 429."""
+    recent = LoginCode.objects.filter(
+        email=destination,
+        created_at__gte=timezone.now() - timedelta(hours=1),
+    ).count()
+    if recent >= 5:
+        return None
+    code_obj = LoginCode.objects.create(
+        email=destination,
+        code=f'{random.randint(0, 999999):06d}',
+        expires_at=timezone.now() + timedelta(minutes=LOGIN_CODE_TTL_MINUTES),
+        request_ip=request.META.get('REMOTE_ADDR'),
+    )
+    LoginCode.prune_for(destination)
+    return code_obj
 
 
 class RegisterView(generics.CreateAPIView):
@@ -56,6 +97,26 @@ class MeView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
 
+    def patch(self, request, *args, **kwargs):
+        """Re-issue the code to the *new* email/phone on the fly when one was
+        provided, so changing your email or phone ends with a verified
+        channel instead of silently losing access."""
+        response = super().patch(request, *args, **kwargs)
+        new_email = (request.data.get('email') or '').strip().lower()
+        new_phone = (request.data.get('phone') or '').strip()
+        current = request.user
+        try:
+            code_obj = None
+            if new_email and new_email != current.email:
+                code_obj = _create_login_code(new_email, request)
+                _deliver_login_code(code_obj, 'email')
+            elif new_phone and new_phone != current.phone:
+                code_obj = _create_login_code(new_phone, request)
+                _deliver_login_code(code_obj, 'sms')
+        except Exception:  # noqa: BLE001 — delivery is best-effort; profile save already happened
+            pass
+        return response
+
 
 class RequestLoginCodeView(generics.GenericAPIView):
     """POST /api/auth/login-code/ — email a single-use 6-digit login code.
@@ -73,34 +134,22 @@ class RequestLoginCodeView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
 
-        recent = LoginCode.objects.filter(
-            email=email,
-            created_at__gte=timezone.now() - timedelta(hours=1),
-        ).count()
-        if recent >= 5:
+        code_obj = _create_login_code(email, request)
+        if code_obj is None:
             return Response(
                 {'detail': 'Too many codes requested. Try again in a little while.'},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        code = f'{random.randint(0, 999999):06d}'
-        LoginCode.objects.create(
-            email=email,
-            code=code,
-            expires_at=timezone.now() + timedelta(minutes=LOGIN_CODE_TTL_MINUTES),
-            request_ip=request.META.get('REMOTE_ADDR'),
-        )
-        LoginCode.prune_for(email)
-
         try:
-            transport = send_login_code_email(email, code)
+            transport = _deliver_login_code(code_obj, 'email')
         except Exception:  # noqa: BLE001 — never leak provider errors to clients
             return Response(
                 {'detail': 'Could not send the email right now. Please try again.'},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        dev_hint = {'dev_code': code} if transport == 'console' else {}
+        dev_hint = {'dev_code': code_obj.code} if transport is None else {}
         return Response({'detail': f'Code sent to {email}.', 'transport': transport, **dev_hint})
 
 
@@ -113,52 +162,68 @@ class VerifyLoginCodeView(generics.GenericAPIView):
 
     permission_classes = [permissions.AllowAny]
     serializer_class = VerifyLoginCodeSerializer
+    identity_defaults: dict = {}
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data['email']
+        destination = serializer.validated_data['email']
         code = serializer.validated_data['code']
+        return _verify_and_sign_in(destination, code, self.identity_defaults)
 
-        login_code = (
-            LoginCode.objects.filter(email=email, consumed_at__isnull=True)
-            .order_by('-created_at')
-            .first()
-        )
-        invalid = Response({'detail': 'That code is invalid or expired.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not login_code or login_code.expires_at < timezone.now():
-            return invalid
-        if login_code.attempts >= LOGIN_CODE_MAX_ATTEMPTS:
+class RequestSmsCodeView(RequestLoginCodeView):
+    """POST /api/auth/login-code/sms/ — text a single-use 6-digit login
+    code. Same rate limit (5/hour), same code model, same 200 shape; the
+    only differences are the phone number input and the delivery channel.
+
+    Without TELNYX_API_KEY the response carries dev_code so the flow stays
+    testable; with the key configured the code is delivered by SMS only.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = RequestSmsCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        phone = serializer.validated_data['phone']
+
+        code_obj = _create_login_code(phone, request)
+        if code_obj is None:
             return Response(
-                {'detail': 'Too many wrong attempts. Request a new code.'},
-                status=status.HTTP_400_BAD_REQUEST,
+                {'detail': 'Too many codes requested. Try again in a little while.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-        if login_code.code != code:
-            LoginCode.objects.filter(pk=login_code.pk).update(attempts=login_code.attempts + 1)
-            return invalid
 
-        login_code.consumed_at = timezone.now()
-        login_code.save(update_fields=['consumed_at'])
+        try:
+            transport = _deliver_login_code(code_obj, 'sms')
+        except Exception:  # noqa: BLE001 — never leak provider errors to clients
+            return Response(
+                {'detail': 'Could not send the SMS right now. Please try again.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
-        with transaction.atomic():
-            user, created = User.objects.get_or_create(email=email)
-            if created:
-                # Give first-login users a budget prompt rather than a zero default.
-                user.monthly_budget_limit = 0
-                user.set_unusable_password()
-                user.save()
+        dev_hint = {'dev_code': code_obj.code} if transport is None else {}
+        return Response({'detail': f'Code sent to {phone}.', 'transport': transport or 'dev', **dev_hint})
 
-        refresh = TokenObtainPairSerializerForUser.get_token(user)
-        return Response(
-            {
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': UserSerializer(user).data,
-                'created_account': created,
-            },
-            status=status.HTTP_200_OK,
-        )
+
+class VerifySmsCodeView(VerifyLoginCodeView):
+    """POST /api/auth/verify-login-code/sms/ — exchange phone + code for
+    JWTs. The phone number IS the identity here: first login creates the
+    account with email = phone so both channels converge on one Users row
+    (the email/phone is editable later from Settings).
+    """
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = VerifySmsCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        destination = serializer.validated_data['phone']
+        code = serializer.validated_data['code']
+        return _verify_and_sign_in(destination, code, {'phone': destination})
 
 
 class TokenObtainPairSerializerForUser:
@@ -173,6 +238,52 @@ class TokenObtainPairSerializerForUser:
         # Match SIMPLE_JWT settings: our PK field is user_id.
         token['user_id'] = str(user.user_id)
         return token
+
+
+def _verify_and_sign_in(destination: str, code: str, identity_defaults: dict | None = None):
+    """Shared verifier for the email and SMS code flows: checks the code,
+    consumes it, creates the account on first login, and mints JWTs."""
+    login_code = (
+        LoginCode.objects.filter(email=destination, consumed_at__isnull=True)
+        .order_by('-created_at')
+        .first()
+    )
+    invalid = Response({'detail': 'That code is invalid or expired.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not login_code or login_code.expires_at < timezone.now():
+        return invalid
+    if login_code.attempts >= LOGIN_CODE_MAX_ATTEMPTS:
+        return Response(
+            {'detail': 'Too many wrong attempts. Request a new code.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if login_code.code != code:
+        LoginCode.objects.filter(pk=login_code.pk).update(attempts=login_code.attempts + 1)
+        return invalid
+
+    login_code.consumed_at = timezone.now()
+    login_code.save(update_fields=['consumed_at'])
+
+    with transaction.atomic():
+        user, created = User.objects.get_or_create(
+            email=destination, defaults=identity_defaults or {}
+        )
+        if created:
+            # Give first-login users a budget prompt rather than a zero default.
+            user.monthly_budget_limit = 0
+            user.set_unusable_password()
+            user.save()
+
+    refresh = TokenObtainPairSerializerForUser.get_token(user)
+    return Response(
+        {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserSerializer(user).data,
+            'created_account': created,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 
 class StoreViewSet(viewsets.ModelViewSet):

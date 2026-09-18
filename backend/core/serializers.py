@@ -11,7 +11,10 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['user_id', 'email', 'first_name', 'last_name', 'monthly_budget_limit', 'created_at']
+        fields = [
+            'user_id', 'email', 'phone', 'first_name', 'last_name',
+            'monthly_budget_limit', 'created_at',
+        ]
         read_only_fields = ['user_id', 'created_at']
 
 
@@ -48,6 +51,50 @@ class VerifyLoginCodeSerializer(serializers.Serializer):
 
     def validate_email(self, value):
         return value.strip().lower()
+
+
+def _normalize_phone(value: str) -> str:
+    """Normalise a phone number to E.164-ish: strip spaces/dashes/brackets
+    and force a single leading +. A local 0-prefixed number (e.g.
+    "082 123 4567") is treated as South African and becomes +27…; callers
+    abroad can always enter the full international format."""
+    cleaned = ''.join(ch for ch in value if ch.isdigit() or ch == '+')
+    if cleaned.startswith('00'):
+        cleaned = '+' + cleaned[2:]
+    elif cleaned.startswith('+'):
+        pass
+    elif cleaned.startswith('0'):
+        cleaned = '+27' + cleaned[1:]
+    else:
+        cleaned = '+' + cleaned
+    return cleaned
+
+
+def _validated_phone(value: str) -> str:
+    phone = _normalize_phone(value)
+    digits = phone[1:]
+    if not digits.isdigit() or not 7 <= len(digits) <= 15:
+        raise serializers.ValidationError('Enter a valid phone number, e.g. +27821234567.')
+    return phone
+
+
+class RequestSmsCodeSerializer(serializers.Serializer):
+    """Input for POST /api/auth/login-code/sms/."""
+
+    phone = serializers.CharField(min_length=8, max_length=24)
+
+    def validate_phone(self, value):
+        return _validated_phone(value)
+
+
+class VerifySmsCodeSerializer(serializers.Serializer):
+    """Input for POST /api/auth/verify-login-code/sms/."""
+
+    phone = serializers.CharField(min_length=8, max_length=24)
+    code = serializers.RegexField(r'^\d{6}$')
+
+    def validate_phone(self, value):
+        return _validated_phone(value)
 
 
 class StoreSerializer(serializers.ModelSerializer):

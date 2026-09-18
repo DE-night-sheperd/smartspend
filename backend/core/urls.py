@@ -9,8 +9,10 @@ from .views import (
     ReceiptViewSet,
     RegisterView,
     RequestLoginCodeView,
+    RequestSmsCodeView,
     StoreViewSet,
     VerifyLoginCodeView,
+    VerifySmsCodeView,
 )
 
 router = DefaultRouter()
@@ -24,6 +26,8 @@ urlpatterns = [
     path('auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/login-code/', RequestLoginCodeView.as_view(), name='request_login_code'),
     path('auth/verify-login-code/', VerifyLoginCodeView.as_view(), name='verify_login_code'),
+    path('auth/login-code/sms/', RequestSmsCodeView.as_view(), name='request_login_code_sms'),
+    path('auth/verify-login-code/sms/', VerifySmsCodeView.as_view(), name='verify_login_code_sms'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('me/', MeView.as_view(), name='me'),
     path('', include(router.urls)),

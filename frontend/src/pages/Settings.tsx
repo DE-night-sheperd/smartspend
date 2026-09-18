@@ -10,6 +10,7 @@ export default function Settings() {
     first_name: user?.first_name ?? '',
     last_name: user?.last_name ?? '',
     email: user?.email ?? '',
+    phone: user?.phone ?? '',
     monthly_budget_limit: String(user?.monthly_budget_limit ?? '0'),
   });
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -30,9 +31,13 @@ export default function Settings() {
         last_name: form.last_name,
         monthly_budget_limit: form.monthly_budget_limit,
       };
-      // Email is shown read-only for code-login users; only patch it if changed.
+      // Email/phone are editable; only patch them when changed so a plain
+      // save doesn't accidentally trigger a re-verification code.
       if (user && form.email !== user.email) {
         payload.email = form.email;
+      }
+      if (form.phone !== (user?.phone ?? '')) {
+        payload.phone = form.phone;
       }
       await updateMe(payload);
       await refreshUser();
@@ -90,9 +95,18 @@ export default function Settings() {
           Email
           <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} />
         </label>
+        <label>
+          Phone (for SMS login codes)
+          <input
+            type="tel"
+            value={form.phone}
+            onChange={(e) => update('phone', e.target.value)}
+            placeholder="082 123 4567"
+          />
+        </label>
         <p className="field-hint">
           {user?.email
-            ? 'Changing this updates where future login codes are sent — use it with care.'
+            ? 'Changing your email or phone re-sends a verification code to the new destination.'
             : ''}
         </p>
 
