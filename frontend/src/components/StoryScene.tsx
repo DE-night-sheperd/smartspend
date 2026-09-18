@@ -48,10 +48,10 @@ const PERSON_LEFT = [
 const PERSON_BOUNCE = [0, -3, 0, -3, 0, -3, 0, -3, 0, 0, -3, 0];
 
 const CAPTIONS = [
-  { text: 'First: shop like you always do.', on: 0.001, off: 4.1 },
-  { text: 'Tap, pay, take the slip.', on: 4.4, off: 6.7 },
-  { text: 'Outside — snap the slip. That’s the whole admin.', on: 7.0, off: 10.0 },
-  { text: 'Paper in the bin. Receipt kept, sorted, budgeted.', on: 10.3, off: 13.4 },
+  { text: 'Shop like normal.', on: 0.001, off: 4.1 },
+  { text: 'Pay and keep the slip.', on: 4.4, off: 6.7 },
+  { text: 'Scan the slip with your phone.', on: 7.0, off: 10.0 },
+  { text: 'Throw the paper away. The receipt stays in the app.', on: 10.3, off: 13.4 },
 ];
 
 function Person({ children }: { children?: React.ReactNode }) {
@@ -317,7 +317,7 @@ function StillScene() {
       </div>
       <div className="story-captions">
         <span className="story-caption" style={{ opacity: 1 }}>
-          Paper in the bin. Receipt kept, sorted, budgeted.
+          Throw the paper away. The receipt stays in the app.
         </span>
       </div>
     </div>
