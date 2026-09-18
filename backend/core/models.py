@@ -1,7 +1,27 @@
 import uuid
 
+from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+
+
+class UserManager(BaseUserManager):
+    """Email-is-the-identity manager — there is no username field."""
+
+    use_in_migrations = True
+
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('An email address is required')
+        user = self.model(email=self.normalize_email(email), **extra_fields)
+        user.set_password(password) if password else user.set_unusable_password()
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        return self.create_user(email, password, **extra_fields)
 
 
 class User(AbstractUser):
@@ -17,6 +37,8 @@ class User(AbstractUser):
     user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     monthly_budget_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = UserManager()
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'last_name']
@@ -48,7 +70,7 @@ class Category(models.Model):
     """CATEGORIES entity (e.g. Groceries, Academic, Fast Food)."""
 
     category_id = models.AutoField(primary_key=True)
-    category_name = models.CharField(max_length=100)
+    category_name = models.CharField(max_length=100, unique=True)
     is_essential = models.BooleanField(default=True)
 
     class Meta:
@@ -57,6 +79,39 @@ class Category(models.Model):
 
     def __str__(self):
         return self.category_name
+
+
+class LoginCode(models.Model):
+    """Short-lived 6-digit code for passwordless email login.
+
+    Codes are single-use, expire after 10 minutes, and only the last 5
+    requests per email are kept so the table can't grow without bound.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    email = models.EmailField(db_index=True)
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(blank=True, null=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    request_ip = models.GenericIPAddressField(blank=True, null=True)
+    request_id = models.UUIDField(default=uuid.uuid4, editable=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.email} · {self.code}'
+
+    @classmethod
+    def prune_for(cls, email: str, keep: int = 5) -> None:
+        """Keep only the most recent `keep` codes for this email."""
+        ids = list(
+            cls.objects.filter(email=email).values_list('id', flat=True)[:keep]
+        )
+        if ids:
+            cls.objects.filter(email=email).exclude(id__in=ids).delete()
 
 
 class Receipt(models.Model):

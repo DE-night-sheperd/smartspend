@@ -4,9 +4,11 @@ import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import NavBar from './components/NavBar';
 import Login from './pages/Login';
+import LoginPassword from './pages/LoginPassword';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Receipts from './pages/Receipts';
+import Settings from './pages/Settings';
 import './App.css';
 
 function AnimatedRoutes() {
@@ -15,6 +17,7 @@ function AnimatedRoutes() {
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
         <Route path="/login" element={<PageFade><Login /></PageFade>} />
+        <Route path="/login-password" element={<PageFade><LoginPassword /></PageFade>} />
         <Route path="/register" element={<PageFade><Register /></PageFade>} />
         <Route
           path="/"
@@ -29,6 +32,14 @@ function AnimatedRoutes() {
           element={
             <ProtectedRoute>
               <PageFade><Receipts /></PageFade>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <PageFade><Settings /></PageFade>
             </ProtectedRoute>
           }
         />

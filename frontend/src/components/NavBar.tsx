@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 const TABS = [
   { to: '/', label: 'Dashboard' },
   { to: '/receipts', label: 'Receipts' },
+  { to: '/settings', label: 'Settings' },
 ];
 
 export default function NavBar() {

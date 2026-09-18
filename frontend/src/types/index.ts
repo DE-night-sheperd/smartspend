@@ -25,10 +25,11 @@ export interface Category {
 export interface ReceiptItem {
   item_id?: number;
   receipt?: number;
-  category: number;
+  /** pk or category name — the backend match-or-creates by name */
+  category: number | string;
   category_name?: string;
   item_name: string;
-  unit_price: string;
+  unit_price: string | number;
   quantity: number;
   line_total?: string;
   is_impulse: boolean;
@@ -57,6 +58,52 @@ export interface MonthlyAnalytics {
   impulse_spend: string;
   monthly_budget_limit: string;
   budget_variance: string;
+}
+
+export interface CategoryBreakdown {
+  category_name: string;
+  is_essential: boolean;
+  total: string;
+  item_count: number;
+}
+
+export interface StoreBreakdown {
+  store_name: string;
+  channel_type: string;
+  total: string;
+  receipt_count: number;
+}
+
+export interface MonthBreakdown {
+  year: number;
+  month: number;
+  total_spent: string;
+  impulse_spend: string;
+  essential_spend: string;
+  budget_limit: string;
+  budget_variance: string;
+  daily_totals: Record<string, string>;
+  categories: CategoryBreakdown[];
+  stores: StoreBreakdown[];
+  channels: Record<string, string>;
+  biggest_purchase: {
+    item_name: string;
+    line_total: string;
+    store_name: string;
+    purchase_date: string;
+  } | null;
+}
+
+export interface OcrDraft {
+  merchant_name: string | null;
+  purchase_date: string | null;
+  total_amount: number | null;
+  channel_type?: ChannelType | null;
+  items: { name: string; price: number; category?: string | null; is_impulse?: boolean }[];
+  raw_text: string;
+  confidence: number;
+  engine: 'gemini' | 'tesseract';
+  notes?: string[];
 }
 
 export interface Paginated<T> {

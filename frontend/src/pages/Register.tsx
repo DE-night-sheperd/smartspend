@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { register } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
@@ -27,26 +28,42 @@ export default function Register() {
     try {
       await register(form);
       await login(form.email, form.password);
-      navigate('/');
-    } catch {
-      setError('Could not create your account. Check your details and try again.');
-    } finally {
+      navigate('/', { replace: true });
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(
+        typeof detail === 'string'
+          ? detail
+          : 'Could not create your account. Check your details and try again.',
+      );
       setSubmitting(false);
     }
   }
 
   return (
     <div className="auth-page">
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <h1>Create your SmartSpend account</h1>
-        <label>
-          First name
-          <input value={form.first_name} onChange={(e) => update('first_name', e.target.value)} required />
-        </label>
-        <label>
-          Last name
-          <input value={form.last_name} onChange={(e) => update('last_name', e.target.value)} required />
-        </label>
+      <motion.form
+        className="auth-card"
+        onSubmit={handleSubmit}
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: 'easeOut' }}
+      >
+        <span className="auth-brand">R:</span>
+        <h1>Create your account</h1>
+        <p className="auth-lede">Snap receipts, tame impulse buys, and close every month in the green.</p>
+
+        <div className="form-row">
+          <label>
+            First name
+            <input value={form.first_name} onChange={(e) => update('first_name', e.target.value)} required />
+          </label>
+          <label>
+            Last name
+            <input value={form.last_name} onChange={(e) => update('last_name', e.target.value)} required />
+          </label>
+        </div>
         <label>
           Email
           <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} required />
@@ -66,6 +83,7 @@ export default function Register() {
           <input
             type="number"
             step="0.01"
+            min="0"
             value={form.monthly_budget_limit}
             onChange={(e) => update('monthly_budget_limit', e.target.value)}
           />
@@ -77,7 +95,7 @@ export default function Register() {
         <p className="auth-switch">
           Already have an account? <Link to="/login">Log in</Link>
         </p>
-      </form>
+      </motion.form>
     </div>
   );
 }

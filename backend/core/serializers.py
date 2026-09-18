@@ -1,9 +1,9 @@
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Case, When, F, DecimalField
 from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Category, Receipt, ReceiptItem, Store
+from .receipt_ai import ParsedReceipt
 
 User = get_user_model()
 
@@ -30,6 +30,26 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
+class RequestLoginCodeSerializer(serializers.Serializer):
+    """Input for POST /api/auth/login-code/."""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class VerifyLoginCodeSerializer(serializers.Serializer):
+    """Input for POST /api/auth/verify-login-code/. On success the view
+    attaches JWT tokens to the response instead of echoing the input."""
+
+    email = serializers.EmailField()
+    code = serializers.RegexField(r'^\d{6}$')
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
 class StoreSerializer(serializers.ModelSerializer):
     class Meta:
         model = Store
@@ -44,9 +64,31 @@ class CategorySerializer(serializers.ModelSerializer):
         read_only_fields = ['category_id']
 
 
+class CategoryNameOrPKField(serializers.Field):
+    """Accepts a category pk (int) or a category name (string) on input;
+    always returns a Category instance, matching-or-creating by name.
+    Serializes back to the pk so the API shape stays unchanged."""
+
+    def to_internal_value(self, value):
+        if value in (None, ''):
+            raise serializers.ValidationError('category is required')
+        if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
+            try:
+                return Category.objects.get(pk=int(value))
+            except Category.DoesNotExist:
+                pass  # fall through and treat it as a name
+        name = str(value).strip()[:100] or 'Other'
+        obj, _ = Category.objects.get_or_create(category_name=name)
+        return obj
+
+    def to_representation(self, value):
+        return value.pk
+
+
 class ReceiptItemSerializer(serializers.ModelSerializer):
     line_total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     category_name = serializers.CharField(source='category.category_name', read_only=True)
+    category = CategoryNameOrPKField()
     # Not required when nested inside ReceiptSerializer.create(), which sets
     # it explicitly; required when hitting /api/receipt-items/ directly.
     receipt = serializers.PrimaryKeyRelatedField(queryset=Receipt.objects.all(), required=False)
@@ -63,6 +105,7 @@ class ReceiptItemSerializer(serializers.ModelSerializer):
 class ReceiptSerializer(serializers.ModelSerializer):
     items = ReceiptItemSerializer(many=True, required=False)
     store_name = serializers.CharField(source='store.store_name', read_only=True)
+    store = serializers.PrimaryKeyRelatedField(queryset=Store.objects.all(), required=False)
     image_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -82,9 +125,39 @@ class ReceiptSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(url) if request else url
         return None
 
+    def _resolve_store(self, validated_data):
+        """Allow creating a store inline by passing store_name instead of
+        store — mirrors what the AI draft / quick-add flow needs."""
+        store = validated_data.get('store')
+        store_name = (self.initial_data.get('store_name') or '').strip()
+        if not store and store_name:
+            channel = self.initial_data.get('channel_type')
+            if channel not in ('Physical_Store', 'Online_Ecommerce'):
+                channel = 'Physical_Store'
+            store, _ = Store.objects.get_or_create(
+                store_name=store_name,
+                defaults={'channel_type': channel},
+            )
+            validated_data['store'] = store
+        elif not store:
+            raise serializers.ValidationError({'store': 'Provide a store id or a store_name to create one inline.'})
+        return validated_data
+
+    def _validate_items(self, items_data):
+        """Default missing categories to 'Other' (CategoryNameOrPKField has
+        already matched-or-created named categories by this point)."""
+        resolved = []
+        for item in items_data:
+            if not item.get('category'):
+                item['category'] = Category.objects.get_or_create(category_name='Other')[0]
+            resolved.append(item)
+        return resolved
+
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
+        validated_data = self._resolve_store(validated_data)
         validated_data['user'] = self.context['request'].user
+        items_data = self._validate_items(items_data)
         receipt = Receipt.objects.create(**validated_data)
         for item_data in items_data:
             ReceiptItem.objects.create(receipt=receipt, **item_data)
@@ -92,6 +165,7 @@ class ReceiptSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
+        items_data = self._validate_items(items_data) if items_data is not None else None
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -105,6 +179,8 @@ class ReceiptSerializer(serializers.ModelSerializer):
 class OCRItemSerializer(serializers.Serializer):
     name = serializers.CharField()
     price = serializers.FloatField()
+    category = serializers.CharField(allow_null=True, required=False)
+    is_impulse = serializers.BooleanField(required=False)
 
 
 class OCRExtractResultSerializer(serializers.Serializer):
@@ -114,8 +190,14 @@ class OCRExtractResultSerializer(serializers.Serializer):
     merchant_name = serializers.CharField(allow_null=True)
     purchase_date = serializers.CharField(allow_null=True)
     total_amount = serializers.FloatField(allow_null=True)
+    channel_type = serializers.ChoiceField(
+        choices=['Physical_Store', 'Online_Ecommerce'], allow_null=True, required=False
+    )
     items = OCRItemSerializer(many=True)
     raw_text = serializers.CharField()
+    confidence = serializers.FloatField()
+    engine = serializers.ChoiceField(choices=['gemini', 'tesseract'])
+    notes = serializers.ListField(child=serializers.CharField(), required=False)
 
 
 class MonthlyAnalyticsSerializer(serializers.Serializer):
@@ -127,3 +209,34 @@ class MonthlyAnalyticsSerializer(serializers.Serializer):
     impulse_spend = serializers.DecimalField(max_digits=12, decimal_places=2)
     monthly_budget_limit = serializers.DecimalField(max_digits=10, decimal_places=2)
     budget_variance = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class CategoryBreakdownSerializer(serializers.Serializer):
+    category_name = serializers.CharField()
+    is_essential = serializers.BooleanField()
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    item_count = serializers.IntegerField()
+
+
+class StoreBreakdownSerializer(serializers.Serializer):
+    store_name = serializers.CharField()
+    channel_type = serializers.CharField()
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    receipt_count = serializers.IntegerField()
+
+
+class MonthBreakdownSerializer(serializers.Serializer):
+    """Response shape for /api/receipts/month_breakdown/."""
+
+    year = serializers.IntegerField()
+    month = serializers.IntegerField()
+    total_spent = serializers.DecimalField(max_digits=12, decimal_places=2)
+    impulse_spend = serializers.DecimalField(max_digits=12, decimal_places=2)
+    essential_spend = serializers.DecimalField(max_digits=12, decimal_places=2)
+    budget_limit = serializers.DecimalField(max_digits=10, decimal_places=2)
+    budget_variance = serializers.DecimalField(max_digits=12, decimal_places=2)
+    daily_totals = serializers.DictField(child=serializers.DecimalField(max_digits=10, decimal_places=2))
+    categories = CategoryBreakdownSerializer(many=True)
+    stores = StoreBreakdownSerializer(many=True)
+    channels = serializers.DictField(child=serializers.DecimalField(max_digits=12, decimal_places=2))
+    biggest_purchase = serializers.DictField()

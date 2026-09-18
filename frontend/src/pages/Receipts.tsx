@@ -1,36 +1,45 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   attachReceiptImage,
-  createCategory,
   createReceipt,
-  createStore,
+  deleteReceipt,
   listCategories,
   listReceipts,
   listStores,
   ocrExtract,
+  updateReceipt,
 } from '../api/endpoints';
-import type { Category, Receipt, Store } from '../types';
+import type { Category, OcrDraft, Receipt, Store } from '../types';
 import { celebrate } from '../lib/celebrate';
 
-const emptyItem = { category: 0, item_name: '', unit_price: '', quantity: 1, is_impulse: false };
+interface ItemDraft {
+  item_name: string;
+  unit_price: string;
+  quantity: number;
+  category: string;
+  is_impulse: boolean;
+}
+
+const emptyItem: ItemDraft = { item_name: '', unit_price: '', quantity: 1, category: '', is_impulse: false };
+
+function sumItems(items: ItemDraft[]): number {
+  return items.reduce((sum, it) => sum + Number(it.unit_price || 0) * (Number(it.quantity) || 0), 0);
+}
 
 export default function Receipts() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Receipt | null>(null); // receipt being edited
   const [showForm, setShowForm] = useState(false);
-  const [ocrDraft, setOcrDraft] = useState<{
-    merchant_name: string | null;
-    purchase_date: string | null;
-    total_amount: number | null;
-    items: { name: string; price: number }[];
-  } | null>(null);
+  const [ocrDraft, setOcrDraft] = useState<OcrDraft | null>(null);
   const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function loadAll() {
     const [r, s, c] = await Promise.all([listReceipts(), listStores(), listCategories()]);
@@ -57,12 +66,44 @@ export default function Receipts() {
       const result = await ocrExtract(file);
       setOcrDraft(result);
       setPendingImage(file);
+      setEditing(null);
       setShowForm(true);
     } catch {
       setScanError('Could not read that image. You can still add the receipt manually below.');
       setShowForm(true);
     } finally {
       setScanning(false);
+    }
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setOcrDraft(null);
+    setPendingImage(null);
+    setShowForm((v) => !v || editing !== null);
+  }
+
+  function openEdit(receipt: Receipt) {
+    setEditing(receipt);
+    setOcrDraft(null);
+    setPendingImage(null);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function handleDelete(receipt: Receipt) {
+    if (!window.confirm(`Delete the ${receipt.store_name} receipt from ${receipt.purchase_date}? This can't be undone.`)) {
+      return;
+    }
+    setDeletingId(receipt.receipt_id);
+    try {
+      await deleteReceipt(receipt.receipt_id);
+      setReceipts((rs) => rs.filter((r) => r.receipt_id !== receipt.receipt_id));
+      setToast('Receipt deleted');
+    } catch {
+      setToast('Could not delete that receipt.');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -74,10 +115,10 @@ export default function Receipts() {
           <p className="page-subtitle">Snap it, check it, done — SmartSpend does the typing.</p>
         </div>
         <div className="header-actions">
-          <label className={`button-secondary scan-dropzone`}>
+          <label className="button-secondary scan-dropzone">
             {scanning ? (
               <>
-                Scanning…
+                Reading receipt…
                 <motion.span
                   className="scan-sweep"
                   initial={{ y: '-100%' }}
@@ -100,15 +141,7 @@ export default function Receipts() {
               }}
             />
           </label>
-          <button
-            onClick={() => {
-              setOcrDraft(null);
-              setPendingImage(null);
-              setShowForm((v) => !v);
-            }}
-          >
-            {showForm ? 'Cancel' : '+ Add manually'}
-          </button>
+          <button onClick={openCreate}>{showForm && !editing ? 'Cancel' : '+ Add manually'}</button>
         </div>
       </div>
 
@@ -124,19 +157,29 @@ export default function Receipts() {
             style={{ overflow: 'hidden' }}
           >
             <ReceiptForm
+              key={editing ? `edit-${editing.receipt_id}` : 'create'}
               stores={stores}
               categories={categories}
-              onStoresChanged={setStores}
-              onCategoriesChanged={setCategories}
+              editing={editing}
               ocrDraft={ocrDraft}
               pendingImage={pendingImage}
-              onCreated={(receipt) => {
-                setReceipts((rs) => [receipt, ...rs]);
+              onCancel={() => {
                 setShowForm(false);
+                setEditing(null);
                 setOcrDraft(null);
                 setPendingImage(null);
-                setToast('Receipt saved ✓');
-                celebrate();
+              }}
+              onSaved={(receipt, mode) => {
+                setReceipts((rs) => {
+                  const exists = rs.some((r) => r.receipt_id === receipt.receipt_id);
+                  return exists ? rs.map((r) => (r.receipt_id === receipt.receipt_id ? receipt : r)) : [receipt, ...rs];
+                });
+                setShowForm(false);
+                setEditing(null);
+                setOcrDraft(null);
+                setPendingImage(null);
+                setToast(mode === 'edit' ? 'Receipt updated ✓' : 'Receipt saved ✓');
+                if (mode === 'create') celebrate();
               }}
             />
           </motion.div>
@@ -167,7 +210,21 @@ export default function Receipts() {
                 {r.receipt_image && <img className="receipt-thumb" src={r.receipt_image} alt="" />}
                 <strong>{r.store_name}</strong>
                 <span>{r.purchase_date}</span>
+                <span className={`source-chip ${r.source_type}`}>{r.source_type === 'camera' ? 'scanned' : 'manual'}</span>
                 <span className="receipt-total">R{r.total_amount}</span>
+                <div className="receipt-actions">
+                  <button className="icon-button" title="Edit receipt" onClick={() => openEdit(r)}>
+                    ✏️
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    title="Delete receipt"
+                    disabled={deletingId === r.receipt_id}
+                    onClick={() => handleDelete(r)}
+                  >
+                    {deletingId === r.receipt_id ? '…' : '🗑️'}
+                  </button>
+                </div>
               </div>
               <ul className="item-list">
                 {r.items.map((it) => (
@@ -201,62 +258,63 @@ export default function Receipts() {
 function ReceiptForm({
   stores,
   categories,
-  onStoresChanged,
-  onCategoriesChanged,
-  onCreated,
+  editing,
   ocrDraft,
   pendingImage,
+  onSaved,
+  onCancel,
 }: {
   stores: Store[];
   categories: Category[];
-  onStoresChanged: (s: Store[]) => void;
-  onCategoriesChanged: (c: Category[]) => void;
-  onCreated: (r: Receipt) => void;
-  ocrDraft?: {
-    merchant_name: string | null;
-    purchase_date: string | null;
-    total_amount: number | null;
-    items: { name: string; price: number }[];
-  } | null;
-  pendingImage?: File | null;
+  editing: Receipt | null;
+  ocrDraft: OcrDraft | null;
+  pendingImage: File | null;
+  onSaved: (receipt: Receipt, mode: 'create' | 'edit') => void;
+  onCancel: () => void;
 }) {
-  const [storeId, setStoreId] = useState<number | ''>('');
-  const [newStoreName, setNewStoreName] = useState(ocrDraft?.merchant_name ?? '');
-  const [purchaseDate, setPurchaseDate] = useState(
-    ocrDraft?.purchase_date ?? new Date().toISOString().slice(0, 10),
+  const initialItems: ItemDraft[] = useMemo(() => {
+    if (editing) {
+      return editing.items.map((it) => ({
+        item_name: it.item_name,
+        unit_price: String(it.unit_price),
+        quantity: it.quantity,
+        category: it.category_name ?? String(it.category),
+        is_impulse: it.is_impulse,
+      }));
+    }
+    if (ocrDraft && ocrDraft.items.length > 0) {
+      return ocrDraft.items.map((it) => ({
+        ...emptyItem,
+        item_name: it.name,
+        unit_price: String(it.price),
+        category: it.category ?? '',
+        is_impulse: it.is_impulse ?? false,
+      }));
+    }
+    return [{ ...emptyItem }];
+  }, [editing, ocrDraft]);
+
+  const [storeId, setStoreId] = useState<number | ''>(editing?.store ?? '');
+  const [newStoreName, setNewStoreName] = useState(
+    editing?.store_name ?? (storeId ? '' : ocrDraft?.merchant_name ?? ''),
   );
-  const [items, setItems] = useState(
-    ocrDraft && ocrDraft.items.length > 0
-      ? ocrDraft.items.map((it) => ({
-          ...emptyItem,
-          item_name: it.name,
-          unit_price: String(it.price),
-        }))
-      : [{ ...emptyItem }],
+  const [channelType, setChannelType] = useState<Store['channel_type']>(
+    ocrDraft?.channel_type === 'Online_Ecommerce' ? 'Online_Ecommerce' : 'Physical_Store',
+  );
+  const [purchaseDate, setPurchaseDate] = useState(
+    editing?.purchase_date ?? ocrDraft?.purchase_date ?? new Date().toISOString().slice(0, 10),
+  );
+  const [items, setItems] = useState<ItemDraft[]>(initialItems);
+  const [totalAmount, setTotalAmount] = useState<string>(
+    editing?.total_amount ?? (ocrDraft?.total_amount != null ? String(ocrDraft.total_amount) : ''),
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (ocrDraft) {
-      const matched = stores.find(
-        (s) => s.store_name.toLowerCase() === (ocrDraft.merchant_name ?? '').toLowerCase(),
-      );
-      if (matched) setStoreId(matched.store_id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const itemsTotal = useMemo(() => sumItems(items), [items]);
 
-  function updateItem(idx: number, patch: Partial<typeof emptyItem>) {
+  function updateItem(idx: number, patch: Partial<ItemDraft>) {
     setItems((its) => its.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  }
-
-  async function ensureCategory(name: string): Promise<number> {
-    const existing = categories.find((c) => c.category_name.toLowerCase() === name.toLowerCase());
-    if (existing) return existing.category_id;
-    const created = await createCategory({ category_name: name, is_essential: true });
-    onCategoriesChanged([...categories, created]);
-    return created.category_id;
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -265,41 +323,44 @@ function ReceiptForm({
     setSubmitting(true);
     try {
       let finalStoreId = storeId;
-      if (!finalStoreId && newStoreName) {
-        const created = await createStore({ store_name: newStoreName, channel_type: 'Physical_Store' });
-        onStoresChanged([...stores, created]);
-        finalStoreId = created.store_id;
+      let finalStoreName: string | undefined;
+      if (!finalStoreId && newStoreName.trim()) {
+        finalStoreName = newStoreName.trim();
       }
-      if (!finalStoreId) throw new Error('Select or add a store');
+      if (!finalStoreId && !finalStoreName) throw new Error('Select or add a store');
 
-      const totalAmount =
-        ocrDraft?.total_amount ?? items.reduce((sum, it) => sum + Number(it.unit_price || 0) * it.quantity, 0);
+      const filled = items.filter((it) => it.item_name.trim());
+      if (filled.length === 0) throw new Error('Add at least one line item with a name');
 
-      const receipt = await createReceipt({
-        store: finalStoreId,
+      const payload = {
+        store: finalStoreId || undefined,
+        store_name: finalStoreName,
+        channel_type: channelType,
         purchase_date: purchaseDate,
-        total_amount: totalAmount.toFixed(2),
-        source_type: pendingImage ? 'camera' : 'upload',
-        image_url: null,
+        total_amount: (totalAmount !== '' ? Number(totalAmount) : itemsTotal).toFixed(2),
+        source_type: pendingImage ? ('camera' as const) : ('upload' as const),
         verified: true,
-        items: items
-          .filter((it) => it.item_name)
-          .map((it) => ({
-            category: it.category,
-            item_name: it.item_name,
-            unit_price: it.unit_price,
-            quantity: it.quantity,
-            is_impulse: it.is_impulse,
-          })),
-      });
+        items: filled.map((it) => ({
+          item_name: it.item_name.trim(),
+          unit_price: it.unit_price === '' ? '0.00' : it.unit_price,
+          quantity: Math.max(1, Number(it.quantity) || 1),
+          category: it.category.trim() || 'Other',
+          is_impulse: it.is_impulse,
+        })),
+      };
 
-      if (pendingImage) {
+      const receipt = editing
+        ? await updateReceipt(editing.receipt_id, payload)
+        : await createReceipt(payload);
+
+      if (pendingImage && !editing) {
         await attachReceiptImage(receipt.receipt_id, pendingImage);
       }
 
-      onCreated(receipt);
+      onSaved(receipt, editing ? 'edit' : 'create');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save this receipt.');
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail || (err instanceof Error ? err.message : 'Could not save this receipt.'));
     } finally {
       setSubmitting(false);
     }
@@ -307,12 +368,22 @@ function ReceiptForm({
 
   return (
     <form className="receipt-form" onSubmit={handleSubmit}>
-      <h2>Verify &amp; save receipt</h2>
+      <div className="form-title-row">
+        <h2>{editing ? 'Edit receipt' : 'Verify & save receipt'}</h2>
+        {ocrDraft && (
+          <span className={`engine-chip ${ocrDraft.engine}`}>
+            {ocrDraft.engine === 'gemini' ? '🤖 AI read' : '⚙️ OCR read'}
+            {ocrDraft.confidence ? ` · ${Math.round(ocrDraft.confidence * 100)}%` : ''}
+          </span>
+        )}
+      </div>
       {ocrDraft && (
         <p className="ocr-hint">
-          Auto-filled from your photo — double check the store, date, and prices below before saving.
+          Auto-filled{ocrDraft.engine === 'gemini' ? ' by AI' : ''} from your photo — check the store, date, prices and
+          categories below before saving.
         </p>
       )}
+
       <div className="form-row">
         <label>
           Store
@@ -326,10 +397,24 @@ function ReceiptForm({
           </select>
         </label>
         {!storeId && (
-          <label>
-            New store name
-            <input value={newStoreName} onChange={(e) => setNewStoreName(e.target.value)} placeholder="e.g. Checkers" />
-          </label>
+          <>
+            <label>
+              New store name
+              <input
+                value={newStoreName}
+                onChange={(e) => setNewStoreName(e.target.value)}
+                placeholder="e.g. Checkers"
+                required
+              />
+            </label>
+            <label>
+              Channel
+              <select value={channelType} onChange={(e) => setChannelType(e.target.value as Store['channel_type'])}>
+                <option value="Physical_Store">Physical store</option>
+                <option value="Online_Ecommerce">Online / ecommerce</option>
+              </select>
+            </label>
+          </>
         )}
         <label>
           Purchase date
@@ -348,6 +433,7 @@ function ReceiptForm({
           <input
             type="number"
             step="0.01"
+            min="0"
             placeholder="Unit price"
             value={it.unit_price}
             onChange={(e) => updateItem(idx, { unit_price: e.target.value })}
@@ -355,27 +441,33 @@ function ReceiptForm({
           <input
             type="number"
             min={1}
+            title="Quantity"
             value={it.quantity}
             onChange={(e) => updateItem(idx, { quantity: Number(e.target.value) })}
           />
           <input
-            placeholder="Category (e.g. Groceries)"
+            placeholder={`Category (e.g. ${categories[0]?.category_name ?? 'Groceries'})`}
             list="category-options"
-            onBlur={async (e) => {
-              if (e.target.value) {
-                const catId = await ensureCategory(e.target.value);
-                updateItem(idx, { category: catId });
-              }
-            }}
+            value={it.category}
+            onChange={(e) => updateItem(idx, { category: e.target.value })}
           />
-          <label className="checkbox-label">
+          <label className="checkbox-label" title="Non-essential impulse buy">
             <input
               type="checkbox"
               checked={it.is_impulse}
               onChange={(e) => updateItem(idx, { is_impulse: e.target.checked })}
             />
-            Impulse buy
+            Impulse
           </label>
+          <button
+            type="button"
+            className="icon-button danger"
+            title="Remove line item"
+            onClick={() => setItems((its) => its.filter((_, i) => i !== idx))}
+            disabled={items.length === 1}
+          >
+            ✕
+          </button>
         </div>
       ))}
       <datalist id="category-options">
@@ -384,14 +476,35 @@ function ReceiptForm({
         ))}
       </datalist>
 
-      <button type="button" onClick={() => setItems((its) => [...its, { ...emptyItem }])}>
-        + Add line item
-      </button>
+      <div className="form-row total-row">
+        <button type="button" className="button-secondary" onClick={() => setItems((its) => [...its, { ...emptyItem }])}>
+          + Add line item
+        </button>
+        <label>
+          Total (R)
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={totalAmount}
+            placeholder={itemsTotal.toFixed(2)}
+            onChange={(e) => setTotalAmount(e.target.value)}
+          />
+        </label>
+        <span className="items-sum">
+          items sum: <strong className="num-tick">R{itemsTotal.toFixed(2)}</strong>
+        </span>
+      </div>
 
       {error && <p className="form-error">{error}</p>}
-      <button type="submit" disabled={submitting}>
-        {submitting ? 'Saving…' : 'Save receipt'}
-      </button>
+      <div className="form-actions">
+        <button type="submit" disabled={submitting}>
+          {submitting ? 'Saving…' : editing ? 'Save changes' : 'Save receipt'}
+        </button>
+        <button type="button" className="button-ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }

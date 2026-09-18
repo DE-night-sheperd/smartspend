@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-export default function Login() {
+export default function LoginPassword() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -16,10 +16,9 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate('/');
+      navigate('/', { replace: true });
     } catch {
       setError('Incorrect email or password.');
-    } finally {
       setSubmitting(false);
     }
   }
@@ -27,7 +26,7 @@ export default function Login() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={handleSubmit}>
-        <h1>Log in to SmartSpend</h1>
+        <h1>Log in with a password</h1>
         <label>
           Email
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -41,7 +40,7 @@ export default function Login() {
           {submitting ? 'Logging in…' : 'Log in'}
         </button>
         <p className="auth-switch">
-          No account? <Link to="/register">Sign up</Link>
+          Prefer no password? <Link to="/login">Email me a code</Link>
         </p>
       </form>
     </div>
