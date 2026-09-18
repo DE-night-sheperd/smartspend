@@ -173,12 +173,17 @@ STATIC_URL = 'static/'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# --- Email (login codes) -------------------------------------------------
+# With RESEND_API_KEY set, codes are sent through Resend's HTTP API.
+# Without it, Django's console backend prints the code to the runserver
+# console so local flows stay testable.
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+RESEND_FROM = os.environ.get('RESEND_FROM', 'SmartSpend <onboarding@resend.dev>')
+DEFAULT_FROM_EMAIL = RESEND_FROM
 
-# Email
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+# --- AI receipt analysis -------------------------------------------------
+# With GEMINI_API_KEY set, receipt scans are analysed by Gemini vision and
+# come back structured (merchant, line items, categories, impulse flags).
+# Without it, the Tesseract heuristic parser in core/ocr.py is used.
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')

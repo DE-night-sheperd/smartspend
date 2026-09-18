@@ -1,15 +1,34 @@
-import { api, tokenStore } from './client';
+import { api, API_BASE_URL, tokenStore } from './client';
 import type {
   Category,
+  MonthBreakdown,
   MonthlyAnalytics,
+  OcrDraft,
   Paginated,
   Receipt,
   Store,
   User,
 } from '../types';
 
+export { API_BASE_URL };
+
 export async function login(email: string, password: string) {
   const { data } = await api.post('/auth/login/', { email, password });
+  tokenStore.setTokens(data.access, data.refresh);
+  return data;
+}
+
+/** Email-code login: request a 6-digit code, then exchange it for JWTs. */
+export async function requestLoginCode(email: string): Promise<{ detail: string; transport: string; dev_code?: string }> {
+  const { data } = await api.post('/auth/login-code/', { email });
+  return data;
+}
+
+export async function verifyLoginCode(
+  email: string,
+  code: string,
+): Promise<{ access: string; refresh: string; created_account: boolean }> {
+  const { data } = await api.post('/auth/verify-login-code/', { email, code });
   tokenStore.setTokens(data.access, data.refresh);
   return data;
 }
@@ -64,12 +83,31 @@ export async function listReceipts() {
   return data.results;
 }
 
-export async function createReceipt(payload: Omit<Receipt, 'receipt_id' | 'user' | 'created_at' | 'store_name'>) {
+/** The backend match-or-creates stores and categories by name, so the
+ * receipt draft can be posted in one shot. */
+export interface ReceiptDraft {
+  store?: number;
+  store_name?: string;
+  channel_type?: Store['channel_type'];
+  purchase_date: string;
+  total_amount: string;
+  source_type: 'camera' | 'upload';
+  verified: boolean;
+  items: {
+    item_name: string;
+    unit_price: string | number;
+    quantity: number;
+    category: number | string;
+    is_impulse: boolean;
+  }[];
+}
+
+export async function createReceipt(payload: ReceiptDraft) {
   const { data } = await api.post<Receipt>('/receipts/', payload);
   return data;
 }
 
-export async function updateReceipt(id: number, payload: Partial<Receipt>) {
+export async function updateReceipt(id: number, payload: Partial<ReceiptDraft>) {
   const { data } = await api.patch<Receipt>(`/receipts/${id}/`, payload);
   return data;
 }
@@ -81,13 +119,9 @@ export async function deleteReceipt(id: number) {
 export async function ocrExtract(image: File) {
   const form = new FormData();
   form.append('image', image);
-  const { data } = await api.post<{
-    merchant_name: string | null;
-    purchase_date: string | null;
-    total_amount: number | null;
-    items: { name: string; price: number }[];
-    raw_text: string;
-  }>('/receipts/ocr_extract/', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  const { data } = await api.post<OcrDraft>('/receipts/ocr_extract/', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
   return data;
 }
 
@@ -120,7 +154,9 @@ export async function getMonthlyAnalytics() {
   return data;
 }
 
-//----------------------------------------------------------------------------------------------------------------------------------------------//
-//now adding the other system architecture and making sire that it renders very well and also authentiocate using a code sent o gmail           //
-//----------------------------------------------------------------------------------------------------------------------------------------------//
-
+export async function getMonthBreakdown(year: number, month: number) {
+  const { data } = await api.get<MonthBreakdown>('/receipts/month_breakdown/', {
+    params: { year, month },
+  });
+  return data;
+}
