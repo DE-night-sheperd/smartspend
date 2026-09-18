@@ -740,26 +740,6 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   z-index: 20;
 }
 .landing-nav .brand { color: #fefcf3; margin-right: 0; }
-.landing-nav-actions { display: flex; align-items: center; gap: 1rem; }
-.landing-link {
-  color: rgba(254, 252, 243, 0.78);
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-.landing-link:hover { color: #fefcf3; }
-.landing-cta-sm {
-  background: var(--grow-bright);
-  color: var(--ink);
-  text-decoration: none;
-  font-weight: 700;
-  font-size: 0.9rem;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: 2px solid transparent;
-  transition: transform 0.15s ease, border-color 0.15s ease;
-}
-.landing-cta-sm:hover { transform: translateY(-1px) rotate(-1deg); border-color: var(--gold-bright); }
 
 /* ---------- hero ---------- */
 .hero {
@@ -786,22 +766,12 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 }
 
 .hero-copy h1 {
-  font-size: clamp(2.4rem, 5.5vw, 3.8rem);
-  line-height: 1.04;
-  margin: 0 0 1rem;
-}
-.hero-copy h1 em {
-  font-style: normal;
-  color: var(--grow);
-}
-.hero-copy > p {
-  font-size: 1.08rem;
-  color: var(--ink-soft);
-  max-width: 34rem;
-  margin: 0 0 1.6rem;
+  font-size: clamp(2.2rem, 4.5vw, 3.1rem);
+  line-height: 1.05;
+  margin: 0 0 1.4rem;
 }
 
-.hero-actions { display: flex; gap: 0.9rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+.hero-actions { display: flex; gap: 0.9rem; flex-wrap: wrap; }
 
 .landing-cta {
   display: inline-block;
@@ -823,19 +793,6 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   box-shadow: 4px 4px 0 var(--line);
 }
 .landing-cta.ghost:hover { box-shadow: 6px 6px 0 var(--line); }
-.landing-cta.big { font-size: 1.1rem; padding: 1rem 2rem; }
-
-.hero-ticks {
-  list-style: none;
-  display: flex;
-  gap: 1.2rem;
-  flex-wrap: wrap;
-  padding: 0;
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.88rem;
-  font-weight: 600;
-}
 
 /* ---------- animated hero receipt ---------- */
 .hero-receipt {
@@ -954,7 +911,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   margin: 0 auto;
   padding: 2.5rem clamp(1.2rem, 5vw, 3rem);
 }
-.landing-steps h2, .landing-features h2 {
+.landing-steps h2 {
   font-size: clamp(1.5rem, 3vw, 2.1rem);
   margin-bottom: 1.8rem;
 }
@@ -982,55 +939,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .step-card h3 { font-size: 1.08rem; }
 .step-card p { color: var(--ink-soft); font-size: 0.92rem; margin: 0; }
 
-/* ---------- features ---------- */
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1.2rem;
-}
-.feature-card {
-  background: var(--card);
-  border: 1.5px solid var(--ink);
-  border-radius: 4px;
-  box-shadow: 4px 4px 0 var(--accent, var(--line));
-  padding: 1.3rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  transition: transform 0.18s ease;
-}
-.feature-card:hover { transform: translateY(-3px) rotate(-0.5deg); }
-.feature-chip {
-  align-self: flex-start;
-  background: rgba(22, 35, 28, 0.06);
-  border: 1px dashed var(--ink-soft);
-  color: var(--ink);
-  font-size: 0.72rem;
-  font-weight: 700;
-  border-radius: 999px;
-  padding: 0.2rem 0.65rem;
-}
-.feature-card h3 { font-size: 1.05rem; }
-.feature-card p { color: var(--ink-soft); font-size: 0.92rem; margin: 0; }
-
-/* ---------- closing CTA + footer ---------- */
-.landing-close {
-  background: var(--ink);
-  color: #fefcf3;
-  text-align: center;
-  padding: 3.5rem 1.5rem 4rem;
-  margin-top: 2rem;
-}
-.landing-close h2 { font-size: clamp(1.6rem, 3.5vw, 2.4rem); margin-bottom: 0.6rem; }
-.landing-close p { color: rgba(254, 252, 243, 0.72); margin: 0 0 1.8rem; }
-.landing-close .landing-cta {
-  background: var(--grow-bright);
-  color: var(--ink);
-  border-color: var(--grow-bright);
-  box-shadow: 4px 4px 0 rgba(254, 252, 243, 0.25);
-}
-.landing-close .landing-cta:hover { box-shadow: 6px 6px 0 rgba(254, 252, 243, 0.25); }
-
+/* ---------- footer ---------- */
 .landing-footer {
   background: var(--ink);
   color: rgba(254, 252, 243, 0.55);
@@ -1043,9 +952,8 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 /* ---------- landing responsive ---------- */
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; }
-  .hero-receipt { max-width: 420px; margin-inline: auto; width: 100%; }
+  .story-scene { max-width: 520px; }
   .steps-grid { grid-template-columns: 1fr; }
-  .features-grid { grid-template-columns: 1fr; }
 }
 
 /* ============================================================
@@ -1310,8 +1218,4 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   background: var(--ink); color: #fefcf3; border-radius: 999px;
   font-size: 2.5cqw; font-weight: 600; padding: 1cqw 2.2cqw;
   box-shadow: 0.7cqw 0.7cqw 0 rgba(254, 252, 243, 0.28);
-}
-
-@media (max-width: 900px) {
-  .story-scene { max-width: 520px; }
 }
