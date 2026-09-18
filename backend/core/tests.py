@@ -98,6 +98,65 @@ class AuthCodeLoginTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+class SmsCodeLoginTest(TestCase):
+    """POST /api/auth/login-code/sms/ + /api/auth/verify-login-code/sms/ —
+    the phone-based twin of the email flow. Without TELNYX_API_KEY the
+    request response carries dev_code (dev mode)."""
+
+    def test_request_code_without_key_returns_dev_code(self):
+        response = self.client.post(
+            reverse('request_login_code_sms'), {'phone': '082 123 4567'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['transport'], 'dev')
+        self.assertIn('dev_code', response.data)
+        self.assertTrue(LoginCode.objects.filter(email='+27821234567').exists())
+
+    def test_local_number_normalized_to_e164(self):
+        self.client.post(reverse('request_login_code_sms'), {'phone': '0821234567'}, format='json')
+        self.assertTrue(LoginCode.objects.filter(email='+27821234567').exists())
+
+    def test_invalid_phone_rejected(self):
+        response = self.client.post(reverse('request_login_code_sms'), {'phone': '123'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(LoginCode.objects.count(), 0)
+
+    def test_verify_creates_account_and_sets_phone(self):
+        self.client.post(reverse('request_login_code_sms'), {'phone': '0821234567'}, format='json')
+        code = LoginCode.objects.order_by('-created_at').first()
+        response = self.client.post(
+            reverse('verify_login_code_sms'), {'phone': '0821234567', 'code': code.code}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+        self.assertTrue(response.data['created_account'])
+        user = User.objects.get(email='+27821234567')
+        self.assertEqual(user.phone, '+27821234567')
+
+    def test_verify_signs_in_existing_user(self):
+        User.objects.create_user(email='+27821234567', password='pass-12345678')
+        self.client.post(reverse('request_login_code_sms'), {'phone': '0821234567'}, format='json')
+        code = LoginCode.objects.order_by('-created_at').first()
+        response = self.client.post(
+            reverse('verify_login_code_sms'), {'phone': '0821234567', 'code': code.code}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['created_account'])
+
+    def test_wrong_code_rejected(self):
+        self.client.post(reverse('request_login_code_sms'), {'phone': '0821234567'}, format='json')
+        response = self.client.post(
+            reverse('verify_login_code_sms'), {'phone': '0821234567', 'code': '999999'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_rate_limit_shared_per_destination(self):
+        for _ in range(5):
+            self.client.post(reverse('request_login_code_sms'), {'phone': '0821234567'}, format='json')
+        response = self.client.post(reverse('request_login_code_sms'), {'phone': '0821234567'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
 class ReceiptCrudAndIsolationTest(TestCase):
     def setUp(self):
         self.alice = User.objects.create_user(email='alice@x.com', password='pass-12345678')

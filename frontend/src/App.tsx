@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import NavBar from './components/NavBar';
+import Landing from './pages/Landing';
 import Login from './pages/Login';
 import LoginPassword from './pages/LoginPassword';
 import Register from './pages/Register';
@@ -16,11 +17,15 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
+        {/* ---------------- public ---------------- */}
+        <Route path="/" element={<PageFade><Landing /></PageFade>} />
         <Route path="/login" element={<PageFade><Login /></PageFade>} />
         <Route path="/login-password" element={<PageFade><LoginPassword /></PageFade>} />
         <Route path="/register" element={<PageFade><Register /></PageFade>} />
+
+        {/* ---------------- authenticated app ---------------- */}
         <Route
-          path="/"
+          path="/dashboard"
           element={
             <ProtectedRoute>
               <PageFade><Dashboard /></PageFade>

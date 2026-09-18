@@ -1,6 +1,7 @@
 export interface User {
   user_id: string;
   email: string;
+  phone?: string;
   first_name: string;
   last_name: string;
   monthly_budget_limit: string;

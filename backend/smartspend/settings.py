@@ -176,14 +176,26 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # --- Email (login codes) -------------------------------------------------
 # With RESEND_API_KEY set, codes are sent through Resend's HTTP API.
 # Without it, Django's console backend prints the code to the runserver
-# console so local flows stay testable.
+# console (and the API returns dev_code) so passwordless login stays
+# testable with zero configuration.
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 RESEND_FROM = os.environ.get('RESEND_FROM', 'SmartSpend <onboarding@resend.dev>')
 DEFAULT_FROM_EMAIL = RESEND_FROM
+if not RESEND_API_KEY:
+    # Django's default is SMTP (localhost:25) which fails without a mail
+    # server — force the console backend so the code flow works out of the box.
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# --- SMS login codes ------------------------------------------------------
+# With TELNYX_API_KEY set, SMS codes are sent through Telnyx's HTTP API.
+# Without it, the SMS login endpoint returns dev_code so the flow stays
+# testable with zero configuration.
+TELNYX_API_KEY = os.environ.get('TELNYX_API_KEY', '')
+TELNYX_FROM = os.environ.get('TELNYX_FROM', 'SmartSpend')
 
 # --- AI receipt analysis -------------------------------------------------
 # With GEMINI_API_KEY set, receipt scans are analysed by Gemini vision and
 # come back structured (merchant, line items, categories, impulse flags).
 # Without it, the Tesseract heuristic parser in core/ocr.py is used.
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.6-flash')

@@ -18,14 +18,24 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   first login. Codes are delivered through [Resend](https://resend.com) when
   `RESEND_API_KEY` is set, or printed to the runserver console in dev
   (the response also carries `dev_code` so the UI can show it).
+- **Passwordless SMS-code login** (`/api/auth/login-code/sms/` +
+  `/api/auth/verify-login-code/sms/`): the phone-number twin of the email
+  flow — same code model, same rate limit, same single-use rules. Local
+  numbers are normalized to E.164 ("082 123 4567" → +27…), and the phone
+  IS the identity on first login (the account's email is set to the
+  normalized number; both fields are editable from Settings, and changing
+  either re-issues a verification code to the new destination). Codes are
+  delivered through [Telnyx](https://telnyx.com) when `TELNYX_API_KEY` and
+  `TELNYX_FROM` are set; without them the endpoint returns `dev_code` so
+  the flow stays testable in dev.
+- **Backend test suite** (`python manage.py test core`): 23 tests covering
+  email- and SMS-code auth, receipt CRUD + per-user isolation, category
+  match-or-create, analytics math, and default-category seeding
 - Full CRUD on stores/categories/receipts/receipt-items via DRF ViewSets
   (receipts support full edit — replace line items, store, date, total — and
   delete)
 - **12 default categories** seeded by migration (Groceries, Transport & Fuel,
   Fast Food & Takeaway, …) with sensible essential/non-essential flags
-- **Backend test suite** (`python manage.py test core`): 16 tests covering
-  email-code auth, receipt CRUD + per-user isolation, category
-  match-or-create, analytics math, and default-category seeding
 - Per-user data isolation enforced in the ORM (`get_queryset` filters by
   `request.user`) — the application-layer equivalent of the Postgres
   Row-Level Security policies in the spec. The original RLS SQL is kept in
@@ -34,10 +44,12 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   upload a receipt photo to `POST /api/receipts/ocr_extract/` and get back a
   best-guess merchant, date, total, channel, and every line item with a
   suggested category and impulse flag. With `GEMINI_API_KEY` set, the photo
-  goes to Gemini vision (`gemini-2.5-flash` by default) which reads crumpled
-  photos, multi-column layouts and fine print directly. Without a key (or if
-  the AI call fails), it falls back to Tesseract OCR + regex heuristics
-  (`core/ocr.py`: auto-crop, contrast boost, till-slip-pattern parsing).
+  goes to Gemini vision (`gemini-3.6-flash` by default) which reads crumpled
+  photos, multi-column layouts and fine print directly — transient rate-limit
+  errors are retried automatically. Without a key (or if the AI call fails),
+  it falls back to Tesseract OCR + regex heuristics (`core/ocr.py`: auto-crop,
+  contrast boost, till-slip-pattern parsing), and if no OCR binary exists the
+  endpoint degrades to a clean manual-entry prompt instead of crashing.
   The response always names its `engine` so the UI can show an honest
   "AI read" vs "OCR read" hint. Nothing is saved at this point — the
   frontend pre-fills the verification form and the user corrects it (stage 3).
@@ -67,7 +79,26 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   indicator, count-up numbers, staggered card entrances, an animated budget
   thermometer) and `canvas-confetti` for a celebratory burst when you're
   under budget or save a receipt. Respects `prefers-reduced-motion`.
-- `axios` client with automatic JWT refresh-on-401
+- **Animated public landing page at `/`** — a looping cartoon story in the
+  hero: a character walks into the corner store, grabs a basket, shops the
+  shelves, pays at the till, walks out, scans the paper slip with their
+  phone, tosses the paper in the bin, and walks off with the receipt kept
+  digitally. Fully hand-built with framer-motion keyframes (no video, no
+  images), narrated by synced captions, scaled with container-query units,
+  and replaced by a static final-state frame under
+  `prefers-reduced-motion`. Steps, feature cards, and closing CTA follow;
+  every CTA funnels into `/register` or `/login`.
+- **Email or SMS code login UI** — the login page has a channel toggle:
+  pick email or phone, get a 6-digit code, verify, done. Dev mode shows the
+  code inline when no delivery provider is configured.
+- **Auth-gated app**: the dashboard lives at `/dashboard` and every
+  authenticated route (dashboard, receipts, settings) redirects signed-out
+  visitors to `/login?returnTo=<original-path>`; after sign-in they land
+  exactly where they were headed. First-login (code-created) accounts go to
+  Settings to set a budget. There is no unauthenticated access to app data —
+  the API returns 401 without a JWT.
+- `axios` client with automatic JWT refresh-on-401; API base URL defaults to
+  same-origin `/api` through the Vite dev proxy, so any preview host works
 - Auth context + protected routes; email-code login, password login, and
   registration pages
 - **Dashboard**: hero budget thermometer that fills up live, count-up stat
@@ -109,19 +140,22 @@ to manual entry.
 ```bash
 cd frontend
 npm install
-cp .env.example .env        # VITE_API_BASE_URL, defaults to localhost:8000/api
+cp .env.example .env        # VITE_API_BASE_URL (optional — /api proxy is the default)
 npm run dev
 ```
-App runs at `http://localhost:5173`.
+App runs at `http://localhost:5173`. One command for both servers:
+`sh ./scripts/dev.sh` (Django API on `:8000` + Vite on `${PORT:-5173}`, both
+bound to `0.0.0.0`).
 
 ### API keys (backend `backend/.env`)
 
 | Key | What it unlocks |
 | --- | --- |
 | `GEMINI_API_KEY` | Real AI receipt analysis — Gemini vision extracts merchant, date, total, line items, categories and impulse flags straight from the photo. Without it, scans degrade to Tesseract OCR + regex heuristics. |
-| `RESEND_API_KEY` | Login codes are emailed for real. Without it, codes print to the runserver console and the API returns `dev_code` so the UI can display it. |
+| `RESEND_API_KEY` | Login codes are emailed for real. Without it, codes print to the Django runserver console and the API returns `dev_code` so the UI can display it. |
+| `TELNYX_API_KEY` + `TELNYX_FROM` | SMS login codes are texted for real through Telnyx. Without them, the SMS endpoint returns `dev_code` so the flow stays testable. |
 
-Both features work without keys (dev fallbacks), so the app is fully usable
+All features work without keys (dev fallbacks), so the app is fully usable
 out of the box.
 
 ## Still worth building next

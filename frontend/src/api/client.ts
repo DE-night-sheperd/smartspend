@@ -1,6 +1,12 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+// Same-origin by default (/api goes through the Vite dev proxy to Django).
+// On localhost (split dev) an explicit VITE_API_BASE_URL wins; on any hosted
+// preview domain we always use the same-origin proxy so the app works
+// regardless of what a local .env file says.
+const isLocalhost =
+  typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+export const API_BASE_URL = isLocalhost ? import.meta.env.VITE_API_BASE_URL || '/api' : '/api';
 
 const ACCESS_KEY = 'smartspend_access';
 const REFRESH_KEY = 'smartspend_refresh';

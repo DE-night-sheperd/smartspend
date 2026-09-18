@@ -33,6 +33,21 @@ export async function verifyLoginCode(
   return data;
 }
 
+/** SMS-code login: the phone-number twin of the email flow. */
+export async function requestSmsCode(phone: string): Promise<{ detail: string; transport: string; dev_code?: string }> {
+  const { data } = await api.post('/auth/login-code/sms/', { phone });
+  return data;
+}
+
+export async function verifySmsCode(
+  phone: string,
+  code: string,
+): Promise<{ access: string; refresh: string; created_account: boolean }> {
+  const { data } = await api.post('/auth/verify-login-code/sms/', { phone, code });
+  tokenStore.setTokens(data.access, data.refresh);
+  return data;
+}
+
 export async function register(payload: {
   email: string;
   first_name: string;

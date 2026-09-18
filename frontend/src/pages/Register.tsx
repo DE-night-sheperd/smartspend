@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { register } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext';
 export default function Register() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo') ?? '/dashboard';
   const [form, setForm] = useState({
     email: '',
     first_name: '',
@@ -28,7 +30,7 @@ export default function Register() {
     try {
       await register(form);
       await login(form.email, form.password);
-      navigate('/', { replace: true });
+      navigate(returnTo, { replace: true });
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;

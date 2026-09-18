@@ -23,6 +23,7 @@ import base64
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 import requests
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
 
-DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
+DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash'
 
 PROMPT_TEMPLATE = """\
 You are a receipt-parsing engine for a budgeting app. Read the receipt in \
@@ -101,7 +102,10 @@ def _read_bytes(file) -> bytes:
 
 
 def _gemini_extract(data: bytes, mime_type: str, category_names: list[str]) -> dict:
-    """Call Gemini with the raw photo and parse its JSON reply."""
+    """Call Gemini with the raw photo and parse its JSON reply.
+
+    One automatic retry (2s backoff) absorbs transient 429/5xx responses —
+    e.g. the free tier's per-minute rate limit when scans come in bursts."""
     api_key = getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
         raise RuntimeError('GEMINI_API_KEY not configured')
@@ -110,26 +114,44 @@ def _gemini_extract(data: bytes, mime_type: str, category_names: list[str]) -> d
     categories = ', '.join(category_names[:30]) if category_names else 'Groceries, Transport, Fast Food, Other'
     prompt = PROMPT_TEMPLATE.format(categories=categories)
 
-    resp = requests.post(
-        GEMINI_ENDPOINT.format(model=model),
-        params={'key': api_key},
-        headers={'Content-Type': 'application/json'},
-        json={
-            'contents': [{
-                'parts': [
-                    {'text': prompt},
-                    {'inline_data': {'mime_type': mime_type, 'data': base64.b64encode(data).decode()}},
-                ]
-            }],
-            'generationConfig': {
-                'temperature': 0.1,
-                'response_mime_type': 'application/json',
-            },
+    body = {
+        'contents': [{
+            'parts': [
+                {'text': prompt},
+                {'inline_data': {'mime_type': mime_type, 'data': base64.b64encode(data).decode()}},
+            ]
+        }],
+        'generationConfig': {
+            'temperature': 0.1,
+            'response_mime_type': 'application/json',
         },
-        timeout=45,
-    )
-    if resp.status_code >= 400:
-        raise RuntimeError(f'Gemini HTTP {resp.status_code}: {resp.text[:200]}')
+    }
+
+    resp = None
+    for attempt in range(2):
+        try:
+            resp = requests.post(
+                GEMINI_ENDPOINT.format(model=model),
+                params={'key': api_key},
+                headers={'Content-Type': 'application/json'},
+                json=body,
+                timeout=45,
+            )
+        except requests.RequestException:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            raise
+        if resp.status_code in (429,) or resp.status_code >= 500:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+        break
+
+    if resp is None or resp.status_code >= 400:
+        detail = resp.text[:200] if resp is not None else 'no response'
+        code = resp.status_code if resp is not None else 0
+        raise RuntimeError(f'Gemini HTTP {code}: {detail}')
 
     payload = resp.json()
     text = ''.join(
@@ -194,7 +216,14 @@ def analyze_receipt(file, category_names: list[str] | None = None) -> ParsedRece
         notes.append('Scanned with on-device OCR (no AI key configured).')
 
     # --- Tesseract fallback ------------------------------------------------
-    legacy = _tesseract_parse(data)
+    try:
+        legacy = _tesseract_parse(data)
+    except Exception as exc:  # noqa: BLE001 — missing binary / unreadable image
+        # Degrade to an empty draft rather than crash: the frontend falls
+        # back to manual entry with a clean message.
+        logger.warning('Tesseract fallback unavailable: %s', exc)
+        notes.append('No OCR engine available on this server — please add the receipt manually.')
+        return ParsedReceipt(raw_text='', confidence=0.0, engine='tesseract', notes=notes)
     return ParsedReceipt(
         raw_text=legacy.raw_text,
         merchant_name=legacy.merchant_name,

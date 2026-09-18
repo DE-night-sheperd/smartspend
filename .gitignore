@@ -1,0 +1,22 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Django
+backend/db.sqlite3
+backend/media/
+
+# Node / Vite
+node_modules/
+dist/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
