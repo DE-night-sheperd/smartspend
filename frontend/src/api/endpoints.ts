@@ -93,9 +93,24 @@ export async function createCategory(payload: { category_name: string; is_essent
   return data;
 }
 
-export async function listReceipts() {
-  const { data } = await api.get<Paginated<Receipt>>('/receipts/');
+export async function listReceipts(
+  params: Record<string, string> = {},
+): Promise<Receipt[]> {
+  const { data } = await api.get<Paginated<Receipt>>('/receipts/', { params });
   return data.results;
+}
+
+/** Authenticated CSV download of every receipt (honours the same filters). */
+export async function exportReceiptsCsv(params: Record<string, string> = {}) {
+  const response = await api.get('/receipts/export_csv/', { params, responseType: 'blob' });
+  const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'smartspend-receipts.csv';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 /** The backend match-or-creates stores and categories by name, so the

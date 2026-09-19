@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
-import { updateMe } from '../api/endpoints';
+import { exportReceiptsCsv, updateMe } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import type { User } from '../types';
 
@@ -116,6 +116,19 @@ export default function Settings() {
           {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : 'Save settings'}
         </button>
       </motion.form>
+
+      <motion.section
+        className="settings-card"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.08 }}
+      >
+        <h2>Your data</h2>
+        <p className="field-hint">Download every receipt and line item as a CSV file.</p>
+        <button type="button" className="button-secondary" onClick={() => void exportReceiptsCsv()}>
+          ⤓ Export receipts (CSV)
+        </button>
+      </motion.section>
     </div>
   );
 }

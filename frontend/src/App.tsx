@@ -10,6 +10,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Receipts from './pages/Receipts';
 import Settings from './pages/Settings';
+import Privacy from './pages/Privacy';
 import './App.css';
 
 function AnimatedRoutes() {
@@ -22,6 +23,7 @@ function AnimatedRoutes() {
         <Route path="/login" element={<PageFade><Login /></PageFade>} />
         <Route path="/login-password" element={<PageFade><LoginPassword /></PageFade>} />
         <Route path="/register" element={<PageFade><Register /></PageFade>} />
+        <Route path="/privacy" element={<PageFade><Privacy /></PageFade>} />
 
         {/* ---------------- authenticated app ---------------- */}
         <Route

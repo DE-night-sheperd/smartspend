@@ -309,3 +309,64 @@ class MonthlyAnalyticsTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertEqual(self.user.monthly_budget_limit, Decimal('2500'))
+
+
+def make_store(name):
+    return Store.objects.create(store_name=name, channel_type=Store.ChannelType.PHYSICAL)
+
+
+class ReceiptSearchExportTests(TestCase):
+    """Search/filter/order params on the receipts list + the CSV export."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='shopper@example.com')
+        self.client = auth_client(self.user)
+        self._mk_receipt('Checkers', 'Milk', '25.00')
+        self._mk_receipt('Kauai', 'Smoothie', '60.00', day='10')
+
+    def _mk_receipt(self, store_name, item_name, total, day='01'):
+        store = make_store(store_name)
+        cat = Category.objects.create(category_name=f'cat-{store_name}')
+        receipt = Receipt.objects.create(
+            user=self.user, store=store, purchase_date=f'2026-09-{day}', total_amount=Decimal(total)
+        )
+        ReceiptItem.objects.create(
+            receipt=receipt, category=cat, item_name=item_name, unit_price=Decimal(total), quantity=1
+        )
+        return receipt
+
+    def _list(self, query=''):
+        return self.client.get(reverse('receipt-list') + query)
+
+    def test_search_matches_store_and_item(self):
+        self.assertEqual(self._list('?search=kauai').data['count'], 1)
+        self.assertEqual(self._list('?search=milk').data['count'], 1)
+        self.assertEqual(self._list('?search=zzz').data['count'], 0)
+
+    def test_store_and_category_filters(self):
+        store_id = Store.objects.get(store_name='Checkers').store_id
+        cat_id = Category.objects.get(category_name='cat-Kauai').category_id
+        self.assertEqual(self._list(f'?store={store_id}').data['count'], 1)
+        self.assertEqual(self._list(f'?category={cat_id}').data['count'], 1)
+
+    def test_date_range_and_ordering(self):
+        self.assertEqual(self._list('?date_from=2026-09-02').data['count'], 1)
+        cheapest = self._list('?ordering=total_amount').data['results'][0]
+        self.assertEqual(cheapest['store_name'], 'Checkers')
+        priciest = self._list('?ordering=-total_amount').data['results'][0]
+        self.assertEqual(priciest['store_name'], 'Kauai')
+
+    def test_csv_export_contains_rows(self):
+        response = self.client.get(reverse('receipt-export-csv'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'text/csv')
+        body = response.content.decode()
+        self.assertIn('Checkers', body)
+        self.assertIn('Milk', body)
+        self.assertIn('Kauai', body)
+        # Header + one row per line item.
+        self.assertEqual(len(body.strip().splitlines()), 3)
+
+    def test_csv_export_requires_auth(self):
+        anon = APIClient()
+        self.assertEqual(anon.get(reverse('receipt-export-csv')).status_code, 401)

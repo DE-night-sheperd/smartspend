@@ -1,3 +1,5 @@
+import csv
+import io
 import random
 from datetime import timedelta
 from decimal import Decimal
@@ -13,7 +15,7 @@ from rest_framework.exceptions import ParseError, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.db.models.functions import TruncMonth
 
 from .emails import send_login_code_email
@@ -321,11 +323,59 @@ class ReceiptViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # RLS equivalent: never return another user's receipts.
-        return (
+        qs = (
             Receipt.objects.filter(user=self.request.user)
             .select_related('store')
             .prefetch_related('items', 'items__category')
         )
+
+        params = self.request.query_params
+        # ?search= matches store or any line-item name.
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(store__store_name__icontains=search) | Q(items__item_name__icontains=search)
+            ).distinct()
+        # ?store=<id> and ?category=<id> exact filters (dropdown-driven).
+        store_id = params.get('store')
+        if store_id:
+            qs = qs.filter(store_id=store_id)
+        category_id = params.get('category')
+        if category_id:
+            qs = qs.filter(items__category_id=category_id).distinct()
+        # ?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD inclusive range.
+        date_from, date_to = params.get('date_from'), params.get('date_to')
+        if date_from:
+            qs = qs.filter(purchase_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(purchase_date__lte=date_to)
+        # ?ordering=-purchase_date | purchase_date | -total_amount | total_amount
+        ordering = params.get('ordering')
+        if ordering in ('purchase_date', '-purchase_date', 'total_amount', '-total_amount'):
+            qs = qs.order_by(ordering, '-created_at')
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_csv(self, request):
+        """Full data export: every receipt and line item as CSV, honouring the
+        same search/filter params as the list endpoint."""
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            ['receipt_id', 'store', 'channel', 'date', 'item', 'category',
+             'quantity', 'unit_price', 'line_total', 'is_impulse', 'receipt_total']
+        )
+        receipts = self.get_queryset().prefetch_related('items', 'items__category')
+        for r in receipts:
+            for i in r.items.all():
+                writer.writerow(
+                    [r.receipt_id, r.store.store_name, r.store.channel_type, r.purchase_date,
+                     i.item_name, i.category.category_name, i.quantity, i.unit_price,
+                     i.line_total, i.is_impulse, r.total_amount]
+                )
+        response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="smartspend-receipts.csv"'
+        return response
 
     @action(detail=False, methods=['get'])
     def monthly_analytics(self, request):

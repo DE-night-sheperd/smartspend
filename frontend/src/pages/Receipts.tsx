@@ -4,6 +4,7 @@ import {
   attachReceiptImage,
   createReceipt,
   deleteReceipt,
+  exportReceiptsCsv,
   listCategories,
   listReceipts,
   listStores,
@@ -12,6 +13,25 @@ import {
 } from '../api/endpoints';
 import type { Category, OcrDraft, Receipt, Store } from '../types';
 import { celebrate } from '../lib/celebrate';
+import SlipScanner from '../components/SlipScanner';
+
+interface ReceiptFilters {
+  search: string;
+  store: string;
+  category: string;
+  date_from: string;
+  date_to: string;
+  ordering: string;
+}
+
+const emptyFilters: ReceiptFilters = {
+  search: '',
+  store: '',
+  category: '',
+  date_from: '',
+  date_to: '',
+  ordering: '-purchase_date',
+};
 
 interface ItemDraft {
   item_name: string;
@@ -40,6 +60,16 @@ export default function Receipts() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [filters, setFilters] = useState<ReceiptFilters>(emptyFilters);
+
+  async function loadReceipts() {
+    const params = Object.fromEntries(
+      Object.entries(filters).filter(([, v]) => v !== ''),
+    );
+    const r = await listReceipts(params);
+    setReceipts(r);
+  }
 
   async function loadAll() {
     const [r, s, c] = await Promise.all([listReceipts(), listStores(), listCategories()]);
@@ -51,7 +81,21 @@ export default function Receipts() {
 
   useEffect(() => {
     loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounced reload whenever filters change.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      loadReceipts().catch(() => undefined);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters]);
+
+  function setFilter<K extends keyof ReceiptFilters>(key: K, value: string) {
+    setFilters((f) => ({ ...f, [key]: value }));
+  }
 
   useEffect(() => {
     if (!toast) return;
@@ -115,7 +159,7 @@ export default function Receipts() {
           <p className="page-subtitle">Snap it, check it, done — SmartSpend does the typing.</p>
         </div>
         <div className="header-actions">
-          <label className="button-secondary scan-dropzone">
+          <button type="button" className="scan-dropzone" onClick={() => setScannerOpen(true)} disabled={scanning}>
             {scanning ? (
               <>
                 Reading receipt…
@@ -127,8 +171,11 @@ export default function Receipts() {
                 />
               </>
             ) : (
-              '📷 Scan receipt'
+              '📷 Scan slip'
             )}
+          </button>
+          <label className="button-secondary scan-dropzone">
+            Upload image
             <input
               type="file"
               accept="image/*"
@@ -146,6 +193,62 @@ export default function Receipts() {
       </div>
 
       {scanError && <p className="form-error">{scanError}</p>}
+
+      <div className="receipt-toolbar">
+        <input
+          className="toolbar-search"
+          type="search"
+          placeholder="Search store or item…"
+          value={filters.search}
+          onChange={(e) => setFilter('search', e.target.value)}
+        />
+        <select value={filters.store} onChange={(e) => setFilter('store', e.target.value)} aria-label="Filter by store">
+          <option value="">All stores</option>
+          {stores.map((s) => (
+            <option key={s.store_id} value={s.store_id}>
+              {s.store_name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.category}
+          onChange={(e) => setFilter('category', e.target.value)}
+          aria-label="Filter by category"
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.category_id} value={c.category_id}>
+              {c.category_name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={filters.date_from}
+          onChange={(e) => setFilter('date_from', e.target.value)}
+          aria-label="From date"
+        />
+        <input
+          type="date"
+          value={filters.date_to}
+          onChange={(e) => setFilter('date_to', e.target.value)}
+          aria-label="To date"
+        />
+        <select value={filters.ordering} onChange={(e) => setFilter('ordering', e.target.value)} aria-label="Sort">
+          <option value="-purchase_date">Newest first</option>
+          <option value="purchase_date">Oldest first</option>
+          <option value="-total_amount">Biggest first</option>
+          <option value="total_amount">Smallest first</option>
+        </select>
+        {(filters.search || filters.store || filters.category || filters.date_from || filters.date_to) && (
+          <button type="button" className="button-ghost" onClick={() => setFilters(emptyFilters)}>
+            Clear
+          </button>
+        )}
+        <button type="button" className="button-secondary toolbar-export" onClick={() => void exportReceiptsCsv()}>
+          ⤓ CSV
+        </button>
+      </div>
 
       <AnimatePresence>
         {showForm && (
@@ -238,6 +341,18 @@ export default function Receipts() {
           ))}
         </AnimatePresence>
       </motion.ul>
+
+      <AnimatePresence>
+        {scannerOpen && (
+          <SlipScanner
+            onClose={() => setScannerOpen(false)}
+            onScanned={(file) => {
+              setScannerOpen(false);
+              void handleScan(file);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {toast && (
