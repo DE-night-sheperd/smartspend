@@ -92,6 +92,9 @@ export default function Landing() {
 
       <footer className="landing-footer">
         <span>© 2026 SmartSpend</span>
+        <Link to="/privacy" className="footer-link">
+          Privacy
+        </Link>
       </footer>
     </div>
   );
