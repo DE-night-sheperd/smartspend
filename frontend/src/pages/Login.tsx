@@ -67,13 +67,17 @@ export default function Login() {
       setDevCode(result.dev_code ?? null);
       setStep('code');
     } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
       const detail =
         (err as { response?: { data?: { detail?: string; phone?: string[]; email?: string[] } } })?.response?.data;
+      const waking = status === 502 || status === 503 || status === 504 || err instanceof TypeError;
       setError(
         detail?.detail ??
           detail?.phone?.[0] ??
           detail?.email?.[0] ??
-          'Could not send a code. Check the details and try again.',
+          (waking
+            ? 'The SmartSpend server is waking up. Wait a few seconds and try again — it usually takes under a minute.'
+            : 'Could not send a code. Check the details and try again.'),
       );
     } finally {
       setBusy(false);
