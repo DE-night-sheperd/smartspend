@@ -52,6 +52,18 @@ export const tokenStore = {
 
 export const api = axios.create({ baseURL: API_BASE_URL });
 
+// The deployed app reaches the API through a tunnel that can return 502/503
+// with "proxy upstream error" when the API server behind it is waking up or
+// restarting. Those are transient — retry a few times with short backoff so a
+// cold server heals itself in the UI instead of showing the user an error.
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const access = tokenStore.getAccess();
   if (access) {
@@ -80,7 +92,32 @@ async function refreshAccessToken(): Promise<string | null> {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    const original = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+      _gatewayRetry?: boolean;
+    };
+    const status = error.response?.status;
+    // Retry transient gateway errors (server waking behind the proxy).
+    if (
+      status &&
+      RETRYABLE_STATUS.has(status) &&
+      original &&
+      !original._gatewayRetry
+    ) {
+      original._gatewayRetry = true;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        await delay(RETRY_DELAY_MS * attempt);
+        try {
+          return await api(original);
+        } catch (retryError) {
+          const retryStatus = (retryError as AxiosError).response?.status;
+          if (!retryStatus || !RETRYABLE_STATUS.has(retryStatus)) {
+            throw retryError;
+          }
+          error = retryError as AxiosError;
+        }
+      }
+    }
     if (error.response?.status === 401 && original && !original._retry) {
       original._retry = true;
       refreshPromise = refreshPromise || refreshAccessToken();

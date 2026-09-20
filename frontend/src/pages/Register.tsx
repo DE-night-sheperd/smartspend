@@ -31,10 +31,17 @@ export default function Register() {
       await login(form.email, form.password);
       navigate(returnTo, { replace: true });
     } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
       const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
       const detail = data?.detail;
       if (typeof detail === 'string' && detail) {
         setError(detail);
+      } else if (status === 502 || status === 503 || status === 504 || err instanceof TypeError) {
+        // Gateway error or the network itself failed: the API server behind
+        // the tunnel is asleep or restarting — never the user's details.
+        setError(
+          'The SmartSpend server is waking up. Wait a few seconds and try again — it usually takes under a minute.',
+        );
       } else if (data && typeof data === 'object') {
         // DRF validation errors arrive as {field: [messages]} — show them
         // as the readable sentences they are (e.g. a taken email address).
@@ -47,6 +54,8 @@ export default function Register() {
             ? 'That email is already registered. Try logging in instead — or use a one-time code.'
             : messages.join(' '),
         );
+      } else if (status) {
+        setError(`Could not create your account (server error ${status}). Please try again.`);
       } else {
         setError('Could not create your account. Check your details and try again.');
       }
