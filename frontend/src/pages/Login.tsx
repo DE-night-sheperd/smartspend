@@ -22,6 +22,16 @@ const CHANNEL_LABELS: Record<Channel, string> = {
   whatsapp: '💬 WhatsApp',
 };
 
+// OTP screens show a standard "Resend code in 0:59" countdown (like banking
+// apps) so the request always feels alive; resending is allowed once it hits 0.
+const RESEND_SECONDS = 60;
+
+function formatCountdown(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export default function Login() {
   const { loginWithCode } = useAuth();
   const navigate = useNavigate();
@@ -38,9 +48,18 @@ export default function Login() {
   const [appleEnabled, setAppleEnabled] = useState(false);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [whatsappEnabled, setWhatsappEnabled] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
+
+  // Tick the resend countdown down once per second while it is running.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setInterval(() => {
+      setResendIn((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendIn > 0]);
 
   const destination = channel === 'email' ? email : phone;
-
   useEffect(() => {
     // The Apple button and SMS/WhatsApp channel tabs only appear when the
     // backend has them configured — an unconfigured option would just fail.
@@ -53,8 +72,7 @@ export default function Login() {
       .catch(() => setAppleEnabled(false));
   }, []);
 
-  async function handleRequestCode(e: FormEvent) {
-    e.preventDefault();
+  async function sendCode() {
     setError(null);
     setBusy(true);
     try {
@@ -66,22 +84,28 @@ export default function Login() {
             : await requestWhatsappCode(phone);
       setDevCode(result.dev_code ?? null);
       setStep('code');
+      setResendIn(RESEND_SECONDS);
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       const detail =
         (err as { response?: { data?: { detail?: string; phone?: string[]; email?: string[] } } })?.response?.data;
-      const waking = status === 502 || status === 503 || status === 504 || err instanceof TypeError;
+      const unreachable = status === 502 || status === 503 || status === 504 || err instanceof TypeError;
       setError(
         detail?.detail ??
           detail?.phone?.[0] ??
           detail?.email?.[0] ??
-          (waking
-            ? 'The SmartSpend server is waking up. Wait a few seconds and try again — it usually takes under a minute.'
+          (unreachable
+            ? 'That took too long — please tap the button again in a few seconds.'
             : 'Could not send a code. Check the details and try again.'),
       );
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleRequestCode(e: FormEvent) {
+    e.preventDefault();
+    void sendCode();
   }
 
   async function handleVerify(e: FormEvent) {
@@ -147,6 +171,7 @@ export default function Login() {
     setChannel(next);
     setError(null);
     setStep('input');
+    setResendIn(0);
   }
 
   const channelNoun = channel === 'email' ? 'inbox' : 'messages';
@@ -282,6 +307,15 @@ export default function Login() {
             )}
 
             <p className="auth-switch">
+              Didn't get it?{' '}
+              {resendIn > 0 ? (
+                <span aria-live="polite">Resend code in {formatCountdown(resendIn)}</span>
+              ) : (
+                <button type="button" className="linklike" onClick={() => void sendCode()} disabled={busy}>
+                  Resend code
+                </button>
+              )}
+              {' · '}
               {channel === 'email' ? 'Wrong address' : 'Wrong number'}?{' '}
               <button type="button" className="linklike" onClick={() => setStep('input')}>
                 Start over
