@@ -36,14 +36,20 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [devCode, setDevCode] = useState<string | null>(null);
   const [appleEnabled, setAppleEnabled] = useState(false);
+  const [smsEnabled, setSmsEnabled] = useState(false);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(false);
 
   const destination = channel === 'email' ? email : phone;
 
   useEffect(() => {
-    // The Apple button only appears when the backend has APPLE_CLIENT_ID
-    // configured — an unconfigured button would just fail.
+    // The Apple button and SMS/WhatsApp channel tabs only appear when the
+    // backend has them configured — an unconfigured option would just fail.
     getAuthConfig()
-      .then((config) => setAppleEnabled(config.apple_enabled))
+      .then((config) => {
+        setAppleEnabled(config.apple_enabled);
+        setSmsEnabled(config.sms_enabled);
+        setWhatsappEnabled(config.whatsapp_enabled);
+      })
       .catch(() => setAppleEnabled(false));
   }, []);
 
@@ -157,19 +163,31 @@ export default function Login() {
             <p className="auth-lede">One-time code, no password. Email, SMS or WhatsApp.</p>
 
             <div className="channel-toggle" role="tablist" aria-label="Login method">
-              {(Object.keys(CHANNEL_LABELS) as Channel[]).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  role="tab"
-                  aria-selected={channel === c}
-                  className={channel === c ? 'active' : ''}
-                  onClick={() => switchChannel(c)}
-                >
-                  {CHANNEL_LABELS[c]}
-                </button>
-              ))}
+              {(Object.keys(CHANNEL_LABELS) as Channel[])
+                .filter(
+                  (c) =>
+                    c === 'email' ||
+                    (c === 'sms' && smsEnabled) ||
+                    (c === 'whatsapp' && whatsappEnabled),
+                )
+                .map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    role="tab"
+                    aria-selected={channel === c}
+                    className={channel === c ? 'active' : ''}
+                    onClick={() => switchChannel(c)}
+                  >
+                    {CHANNEL_LABELS[c]}
+                  </button>
+                ))}
             </div>
+            {!smsEnabled && (
+              <p className="field-hint">
+                SMS & WhatsApp codes are coming soon — use email for now.
+              </p>
+            )}
 
             {channel === 'email' ? (
               <label>

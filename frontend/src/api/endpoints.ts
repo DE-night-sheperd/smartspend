@@ -66,8 +66,13 @@ export async function verifyWhatsappCode(
   return data;
 }
 
-/** Public capability flags so the login page renders honest buttons. */
-export async function getAuthConfig(): Promise<{ apple_enabled: boolean }> {
+/** Public capability flags so the login page renders honest buttons.
+ * SMS/WhatsApp tabs only appear when the backend has a real sender number. */
+export async function getAuthConfig(): Promise<{
+  apple_enabled: boolean;
+  sms_enabled: boolean;
+  whatsapp_enabled: boolean;
+}> {
   const { data } = await api.get('/auth/config/');
   return data;
 }

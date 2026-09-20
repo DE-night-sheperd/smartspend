@@ -292,14 +292,27 @@ class VerifyWhatsappCodeView(VerifySmsCodeView):
 
 class AuthConfigView(generics.GenericAPIView):
     """GET /api/auth/config/ — public capability flags so the login page
-    can render honest buttons (e.g. Apple sign-in only when configured)."""
+    can render honest buttons: Apple sign-in only when configured, and the
+    SMS/WhatsApp channel tabs only when a real E.164 sender number exists
+    (a Telnyx key alone cannot deliver SMS in ZA without a purchased number,
+    so advertising those channels would just dead-end the user)."""
 
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         from .apple_auth import apple_sign_in_enabled
 
-        return Response({'apple_enabled': apple_sign_in_enabled()})
+        sender = (getattr(settings, 'TELNYX_FROM', '') or '').strip()
+        # A real sender is an E.164 phone number; anything else (e.g. the
+        # alphanumeric default 'SmartSpend') cannot deliver SA SMS.
+        sms_enabled = bool(getattr(settings, 'TELNYX_API_KEY', '')) and sender.startswith('+')
+        return Response(
+            {
+                'apple_enabled': apple_sign_in_enabled(),
+                'sms_enabled': sms_enabled,
+                'whatsapp_enabled': sms_enabled,
+            }
+        )
 
 
 class AppleSignInView(generics.GenericAPIView):
