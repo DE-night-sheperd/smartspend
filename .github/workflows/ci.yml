@@ -45,6 +45,7 @@ jobs:
         run: npm ci
 
       - name: Typecheck
+        working-directory: frontend
         run: npx tsc -b --noEmit
 
       - name: Frontend tests
@@ -52,4 +53,5 @@ jobs:
         run: npm test
 
       - name: Build
+        working-directory: frontend
         run: npx vite build
