@@ -1,12 +1,18 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-// Same-origin by default (/api goes through the Vite dev proxy to Django).
-// On localhost (split dev) an explicit VITE_API_BASE_URL wins; on any hosted
-// preview domain we always use the same-origin proxy so the app works
-// regardless of what a local .env file says.
+// Same-origin by default: in dev, /api goes through the Vite dev proxy to
+// Django; a deployed static build expects the API at same-origin /api too.
+// A build-time VITE_API_BASE_URL points a deployed frontend at an API hosted
+// elsewhere — honoured in `vite build` output (import.meta.env.PROD) and in
+// split local dev on localhost. Hosted dev previews always use the
+// same-origin proxy so a stale local .env can never break them.
 const isLocalhost =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-export const API_BASE_URL = isLocalhost ? import.meta.env.VITE_API_BASE_URL || '/api' : '/api';
+export const API_BASE_URL = import.meta.env.PROD
+  ? import.meta.env.VITE_API_BASE_URL || '/api'
+  : isLocalhost
+    ? import.meta.env.VITE_API_BASE_URL || '/api'
+    : '/api';
 
 const ACCESS_KEY = 'smartspend_access';
 const REFRESH_KEY = 'smartspend_refresh';
