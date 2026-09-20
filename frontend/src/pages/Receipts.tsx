@@ -478,6 +478,8 @@ function ReceiptForm({
   const [branch, setBranch] = useState(editing?.branch_name ?? ocrDraft?.branch ?? '');
   const [slipNumber, setSlipNumber] = useState(editing?.slip_number ?? ocrDraft?.slip_number ?? '');
   const [paymentMethod, setPaymentMethod] = useState(editing?.payment_method ?? ocrDraft?.payment_method ?? '');
+  // Verbatim transcription of the slip as printed (proof-of-purchase).
+  const originalText = editing?.original_text ?? (ocrDraft?.original_lines ?? []).join('\n');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -514,6 +516,7 @@ function ReceiptForm({
         branch_name: branch.trim(),
         slip_number: slipNumber.trim(),
         payment_method: paymentMethod.trim(),
+        original_text: originalText,
         items: filled.map((it) => ({
           item_name: it.item_name.trim(),
           unit_price: it.unit_price === '' ? '0.00' : it.unit_price,

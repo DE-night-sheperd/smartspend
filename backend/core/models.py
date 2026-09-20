@@ -160,6 +160,11 @@ class Receipt(models.Model):
     branch_name = models.CharField(max_length=160, blank=True, help_text='Store branch as printed, e.g. "Sandton City 1049".')
     slip_number = models.CharField(max_length=80, blank=True, help_text='Transaction/invoice/slip number printed on the slip.')
     payment_method = models.CharField(max_length=60, blank=True, help_text='Payment line as printed, e.g. "Visa ••1234" or "Cash".')
+    original_text = models.TextField(
+        blank=True,
+        help_text='Verbatim line-by-line transcription of the slip as printed '
+        '(proof-of-purchase for returns). Lines joined with newlines.',
+    )
     verified = models.BooleanField(default=False, help_text='Set true once user confirms OCR-parsed data.')
     created_at = models.DateTimeField(auto_now_add=True)
 

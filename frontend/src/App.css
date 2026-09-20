@@ -1445,6 +1445,25 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 }
 .till-print-row { text-align: center; margin-top: 0.6rem; }
 .till-print-btn { font-size: 0.82rem; padding: 0.45rem 0.9rem; }
+
+.till-view-toggle {
+  display: flex; gap: 0.3rem; justify-content: center;
+  margin: 0.5rem 0 0.3rem;
+}
+.till-view-toggle button {
+  font-family: inherit; font-size: 0.68rem; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 0.2rem 0.7rem;
+  background: transparent; color: #6b756e;
+  border: 1px solid #9aa39b; border-radius: 999px; cursor: pointer;
+}
+.till-view-toggle button.active { background: #26302a; color: #fffdf6; border-color: #26302a; }
+.till-view-toggle button:disabled { opacity: 0.45; cursor: default; }
+.till-original { padding: 0.3rem 0 0.2rem; }
+.till-original-line {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 0.8rem; line-height: 1.55;
+}
+
 .slip-identity { margin: 0.4rem 0 0.8rem; font-size: 0.9rem; }
 .slip-identity summary { cursor: pointer; font-weight: 600; color: var(--ink-soft); }
 .slip-identity[open] summary { margin-bottom: 0.4rem; }

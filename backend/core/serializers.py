@@ -182,6 +182,7 @@ class ReceiptSerializer(serializers.ModelSerializer):
             'total_amount', 'source_type', 'image_url', 'receipt_image', 'verified',
             'created_at', 'items',
             'cashier_name', 'branch_name', 'slip_number', 'payment_method',
+            'original_text',
         ]
         read_only_fields = ['receipt_id', 'user', 'created_at', 'image_url']
         extra_kwargs = {'receipt_image': {'write_only': False, 'required': False}}
@@ -299,6 +300,9 @@ class OCRExtractResultSerializer(serializers.Serializer):
     branch = serializers.CharField(allow_null=True, required=False)
     slip_number = serializers.CharField(allow_null=True, required=False)
     payment_method = serializers.CharField(allow_null=True, required=False)
+    original_lines = serializers.ListField(
+        child=serializers.CharField(allow_blank=True), required=False
+    )
     items = OCRItemSerializer(many=True)
     loyalty_points = LoyaltyDraftSerializer(many=True, required=False)
     raw_text = serializers.CharField()
