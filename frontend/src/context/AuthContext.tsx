@@ -5,6 +5,7 @@ import {
   logout as apiLogout,
   verifyLoginCode,
   verifySmsCode,
+  verifyWhatsappCode,
 } from '../api/endpoints';
 import { tokenStore } from '../api/client';
 import type { User } from '../types';
@@ -13,8 +14,8 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  /** Email or SMS code login. Returns true when the account was just created. */
-  loginWithCode: (channel: 'email' | 'sms', destination: string, code: string) => Promise<boolean>;
+  /** Email, SMS or WhatsApp code login. Returns true when the account was just created. */
+  loginWithCode: (channel: 'email' | 'sms' | 'whatsapp', destination: string, code: string) => Promise<boolean>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -51,8 +52,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshUser();
   }
 
-  async function loginWithCode(channel: 'email' | 'sms', destination: string, code: string) {
-    const result = channel === 'sms' ? await verifySmsCode(destination, code) : await verifyLoginCode(destination, code);
+  async function loginWithCode(channel: 'email' | 'sms' | 'whatsapp', destination: string, code: string) {
+    const result =
+      channel === 'sms'
+        ? await verifySmsCode(destination, code)
+        : channel === 'whatsapp'
+          ? await verifyWhatsappCode(destination, code)
+          : await verifyLoginCode(destination, code);
     await refreshUser();
     return result.created_account;
   }

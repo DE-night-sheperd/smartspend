@@ -1,9 +1,9 @@
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import ProtectedRoute from '../components/ProtectedRoute';
-import { getMe, verifyLoginCode } from '../api/endpoints';
+import { getAuthConfig, getMe, verifyLoginCode } from '../api/endpoints';
 import { tokenStore } from '../api/client';
 import type { User } from '../types';
 
@@ -28,6 +28,13 @@ function Probe({ path }: { path: string }) {
     </p>
   );
 }
+
+// The Login page (rendered by ProtectedRoute redirects) fetches auth
+// capability flags on mount; give the auto-mock a real resolution so the
+// effect doesn't crash the tree under test.
+beforeEach(() => {
+  vi.mocked(getAuthConfig).mockResolvedValue({ apple_enabled: false });
+});
 
 describe('AuthContext', () => {
   beforeEach(() => {
@@ -87,18 +94,31 @@ describe('AuthContext', () => {
 describe('ProtectedRoute', () => {
   it('redirects anonymous users to /login with a returnTo param', async () => {
     vi.mocked(getMe).mockRejectedValue(new Error('no auth'));
+
+    function LocationProbe() {
+      const location = useLocation();
+      return <p data-testid="loc">{location.pathname}{location.search}</p>;
+    }
+
     render(
       <MemoryRouter initialEntries={['/receipts']}>
         <AuthProvider>
-          <ProtectedRoute>
-            <p>secret receipts</p>
-          </ProtectedRoute>
+          <Routes>
+            <Route
+              path="/receipts"
+              element={
+                <ProtectedRoute>
+                  <p>secret receipts</p>
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/login" element={<LocationProbe />} />
+          </Routes>
         </AuthProvider>
       </MemoryRouter>,
     );
     await waitFor(() => {
-      const login = screen.getByText(/code/i);
-      expect(login).toBeInTheDocument();
+      expect(screen.getByTestId('loc')).toHaveTextContent('/login?returnTo=%2Freceipts');
     });
     expect(screen.queryByText('secret receipts')).not.toBeInTheDocument();
   });

@@ -3,9 +3,29 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import Landing from '../pages/Landing';
 import Privacy from '../pages/Privacy';
+import Points from '../pages/Points';
 import Receipts from '../pages/Receipts';
+import Settings from '../pages/Settings';
+import { AuthProvider, useAuth } from '../context/AuthContext';
+import { tokenStore } from '../api/client';
+import type { User } from '../types';
 
 vi.mock('../api/endpoints');
+
+const me: User = {
+  user_id: 'u1',
+  email: 's@example.com',
+  first_name: 'Sipho',
+  last_name: 'N',
+  phone: '',
+  monthly_budget_limit: '2500.00',
+  created_at: '2026-09-01T00:00:00Z',
+};
+
+/** Date string ~5 days from now so the 7-day warning window holds on any run date. */
+function daysFromNow(days: number): string {
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+}
 
 describe('Landing', () => {
   it('shows the app entrance with create-account and login CTAs', () => {
@@ -52,5 +72,78 @@ describe('Receipts page', () => {
     expect(screen.getByPlaceholderText('Search store or item…')).toBeInTheDocument();
     expect(screen.getByLabelText('Sort')).toBeInTheDocument();
     expect(screen.getByText('⤓ CSV')).toBeInTheDocument();
+  });
+});
+
+describe('Points page', () => {
+  it('groups spendable points per store and warns about the 7-day window', async () => {
+    const { listPoints } = await import('../api/endpoints');
+    vi.mocked(listPoints).mockResolvedValue([
+      {
+        points_id: 1, store_id: 1, store_name: 'Pick n Pay', label: 'Smart Shopper points',
+        points: 250, expires_at: daysFromNow(5), created_at: '',
+      },
+      {
+        points_id: 2, store_id: 2, store_name: 'Clicks', label: 'ClubCard points',
+        points: 500, expires_at: null, created_at: '',
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <Points />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('Pick n Pay')).toBeInTheDocument();
+    expect(screen.getByText('Clicks')).toBeInTheDocument();
+    expect(screen.getByText(/points expire within 7 days/)).toBeInTheDocument();
+    expect(screen.getByText('750')).toBeInTheDocument(); // total across stores
+    expect(screen.getByText(/points across 2 stores/)).toBeInTheDocument();
+    expect(screen.getByText('Show expired points')).toBeInTheDocument();
+  });
+
+  it('shows the empty state when no points have been scanned', async () => {
+    const { listPoints } = await import('../api/endpoints');
+    vi.mocked(listPoints).mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Points />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(/Scan a Pick n Pay or Clicks slip/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('Settings page', () => {
+  it('keeps the budget limit inside profile settings, after the profile fields', async () => {
+    const { getMe } = await import('../api/endpoints');
+    vi.mocked(getMe).mockResolvedValue(me);
+    tokenStore.setTokens('access', 'refresh');
+
+    // Mirror ProtectedRoute: Settings only mounts once auth has resolved.
+    function SettingsGate() {
+      const { user, loading } = useAuth();
+      if (loading || !user) return <p>loading…</p>;
+      return <Settings />;
+    }
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <SettingsGate />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Profile' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Budget' })).toBeInTheDocument();
+    expect(await screen.findByLabelText(/Monthly budget limit/)).toHaveValue(2500);
+
+    // Order: the Profile section comes before the Budget section.
+    const profile = screen.getByRole('heading', { name: 'Profile' });
+    const budget = screen.getByRole('heading', { name: 'Budget' });
+    expect(profile.compareDocumentPosition(budget) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

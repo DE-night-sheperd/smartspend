@@ -192,6 +192,14 @@ if not RESEND_API_KEY:
 # testable with zero configuration.
 TELNYX_API_KEY = os.environ.get('TELNYX_API_KEY', '')
 TELNYX_FROM = os.environ.get('TELNYX_FROM', 'SmartSpend')
+# WhatsApp codes ride the same Telnyx key; this is the WhatsApp-enabled
+# sender (falls back to TELNYX_FROM when unset).
+TELNYX_WHATSAPP_FROM = os.environ.get('TELNYX_WHATSAPP_FROM', '')
+
+# --- Sign in with Apple ----------------------------------------------------
+# Services ID (web) or Bundle ID (iOS) that Apple identity tokens are issued
+# for. Unset = Apple sign-in button hidden and /api/auth/apple/ answers 503.
+APPLE_CLIENT_ID = os.environ.get('APPLE_CLIENT_ID', '')
 
 # --- AI receipt analysis -------------------------------------------------
 # With GEMINI_API_KEY set, receipt scans are analysed by Gemini vision and

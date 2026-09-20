@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Category, Receipt, ReceiptItem, Store
+from .models import Category, LoyaltyPoints, Receipt, ReceiptItem, Store
 from .receipt_ai import ParsedReceipt
 
 User = get_user_model()
@@ -23,7 +23,10 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['email', 'first_name', 'last_name', 'password', 'monthly_budget_limit']
+        fields = ['email', 'first_name', 'last_name', 'password']
+        # monthly_budget_limit is deliberately NOT settable here — it lives in
+        # Settings (PATCH /api/me/) so budget is a profile decision, not a
+        # registration step.
 
     def create(self, validated_data):
         password = validated_data.pop('password')
@@ -95,6 +98,23 @@ class VerifySmsCodeSerializer(serializers.Serializer):
 
     def validate_phone(self, value):
         return _validated_phone(value)
+
+
+class RequestWhatsappCodeSerializer(RequestSmsCodeSerializer):
+    """Input for POST /api/auth/login-code/whatsapp/ — same phone
+    normalization as SMS; only the delivery channel differs."""
+
+
+class VerifyWhatsappCodeSerializer(VerifySmsCodeSerializer):
+    """Input for POST /api/auth/verify-login-code/whatsapp/."""
+
+
+class AppleSignInSerializer(serializers.Serializer):
+    """Input for POST /api/auth/apple/. The frontend hands over the
+    identity (JWT) token from Sign in with Apple; an optional display
+    name rides along because Apple only shares it on first consent."""
+
+    identity_token = serializers.CharField(min_length=20, max_length=4096)
 
 
 class StoreSerializer(serializers.ModelSerializer):
@@ -202,13 +222,39 @@ class ReceiptSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
+        loyalty_data = self.initial_data.get('loyalty_points') or []
         validated_data = self._resolve_store(validated_data)
         validated_data['user'] = self.context['request'].user
         items_data = self._validate_items(items_data)
         receipt = Receipt.objects.create(**validated_data)
         for item_data in items_data:
             ReceiptItem.objects.create(receipt=receipt, **item_data)
+        self._save_loyalty(receipt, loyalty_data)
         return receipt
+
+    def _save_loyalty(self, receipt: Receipt, loyalty_data) -> None:
+        """Persist spendable-points blocks read off this slip. Each entry
+        becomes a LoyaltyPoints row so the Points page can track balances
+        and expiry per store."""
+        if not isinstance(loyalty_data, list):
+            return
+        for entry in loyalty_data[:5]:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                points = int(float(entry.get('points') or 0))
+            except (TypeError, ValueError):
+                continue
+            if points <= 0:
+                continue
+            LoyaltyPoints.objects.create(
+                user=receipt.user,
+                store=receipt.store,
+                receipt=receipt,
+                points=points,
+                label=str(entry.get('label') or 'Points')[:255],
+                expires_at=entry.get('expires_at') or None,
+            )
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
@@ -230,6 +276,14 @@ class OCRItemSerializer(serializers.Serializer):
     is_impulse = serializers.BooleanField(required=False)
 
 
+class LoyaltyDraftSerializer(serializers.Serializer):
+    """One spendable-points block read off a slip (draft AND saved shape)."""
+
+    points = serializers.IntegerField(min_value=1)
+    label = serializers.CharField(required=False, allow_blank=True, default='Points')
+    expires_at = serializers.DateField(required=False, allow_null=True)
+
+
 class OCRExtractResultSerializer(serializers.Serializer):
     """Draft data returned to the frontend for the user to review/correct —
     nothing is saved to the database at this point (Verification Layer)."""
@@ -241,6 +295,7 @@ class OCRExtractResultSerializer(serializers.Serializer):
         choices=['Physical_Store', 'Online_Ecommerce'], allow_null=True, required=False
     )
     items = OCRItemSerializer(many=True)
+    loyalty_points = LoyaltyDraftSerializer(many=True, required=False)
     raw_text = serializers.CharField()
     confidence = serializers.FloatField()
     engine = serializers.ChoiceField(choices=['gemini', 'tesseract'])

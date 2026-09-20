@@ -18,11 +18,13 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db.models import Q, Sum
 from django.db.models.functions import TruncMonth
 
+from .apple_auth import verify_apple_identity_token
 from .emails import send_login_code_email
-from .models import Category, LoginCode, Receipt, ReceiptItem, Store
-from .receipt_ai import analyze_receipt
+from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
+from .receipt_ai import analyze_receipt, analyze_receipt_text
 from .reports import build_monthly_audit_pdf
 from .serializers import (
+    AppleSignInSerializer,
     CategorySerializer,
     MonthlyAnalyticsSerializer,
     MonthBreakdownSerializer,
@@ -32,12 +34,16 @@ from .serializers import (
     RegisterSerializer,
     RequestLoginCodeSerializer,
     RequestSmsCodeSerializer,
+    RequestWhatsappCodeSerializer,
+    LoyaltyDraftSerializer,
     StoreSerializer,
     UserSerializer,
     VerifyLoginCodeSerializer,
     VerifySmsCodeSerializer,
+    VerifyWhatsappCodeSerializer,
 )
 from .sms import send_login_code_sms
+from .whatsapp import send_login_code_whatsapp
 
 User = get_user_model()
 
@@ -54,9 +60,11 @@ def _deliver_login_code(code: LoginCode, channel: str) -> str | None:
     testable with zero configuration. Raises on provider errors so callers
     can return a clean 502.
     """
-    if channel == 'sms':
+    if channel in ('sms', 'whatsapp'):
         if not getattr(settings, 'TELNYX_API_KEY', ''):
-            return None  # dev mode: no SMS provider configured
+            return None  # dev mode: no messaging provider configured
+        if channel == 'whatsapp':
+            return send_login_code_whatsapp(code.email, code.code)
         return send_login_code_sms(code.email, code.code)
     transport = send_login_code_email(code.email, code.code)
     return None if transport == 'console' else transport
@@ -226,6 +234,140 @@ class VerifySmsCodeView(VerifyLoginCodeView):
         destination = serializer.validated_data['phone']
         code = serializer.validated_data['code']
         return _verify_and_sign_in(destination, code, {'phone': destination})
+
+
+class RequestWhatsappCodeView(RequestSmsCodeView):
+    """POST /api/auth/login-code/whatsapp/ — send the 6-digit login code as
+    a WhatsApp message. Shares the phone normalization, rate limit, code
+    model and response shape with the SMS view; only the delivery channel
+    differs (Telnyx Messages API, type=whatsapp — same TELNYX_API_KEY).
+
+    Without a WhatsApp-enabled sender the response carries dev_code so the
+    flow stays testable; once TELNYX_API_KEY and a WhatsApp profile exist
+    the code is delivered by WhatsApp only.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = RequestWhatsappCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        phone = serializer.validated_data['phone']
+
+        code_obj = _create_login_code(phone, request)
+        if code_obj is None:
+            return Response(
+                {'detail': 'Too many codes requested. Try again in a little while.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        try:
+            transport = _deliver_login_code(code_obj, 'whatsapp')
+        except Exception:  # noqa: BLE001 — never leak provider errors to clients
+            return Response(
+                {'detail': 'Could not send the WhatsApp message right now. Please try again.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        dev_hint = {'dev_code': code_obj.code} if transport is None else {}
+        return Response({'detail': f'Code sent to {phone}.', 'transport': transport or 'dev', **dev_hint})
+
+
+class VerifyWhatsappCodeView(VerifySmsCodeView):
+    """POST /api/auth/verify-login-code/whatsapp/ — exchange phone + code
+    for JWTs via the WhatsApp channel (same identity rules as SMS)."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = VerifyWhatsappCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        destination = serializer.validated_data['phone']
+        code = serializer.validated_data['code']
+        return _verify_and_sign_in(destination, code, {'phone': destination})
+
+
+class AuthConfigView(generics.GenericAPIView):
+    """GET /api/auth/config/ — public capability flags so the login page
+    can render honest buttons (e.g. Apple sign-in only when configured)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from .apple_auth import apple_sign_in_enabled
+
+        return Response({'apple_enabled': apple_sign_in_enabled()})
+
+
+class AppleSignInView(generics.GenericAPIView):
+    """POST /api/auth/apple/ — exchange a Sign in with Apple identity
+    token for SmartSpend JWTs. The token's signature, issuer, audience and
+    expiry are verified against Apple's published keys before the email
+    claim is trusted; first login creates the account.
+
+    Requires APPLE_CLIENT_ID to be configured (the Services/Bundle ID the
+    frontend Apple button uses); otherwise answers 503.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = AppleSignInSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        identity_token = serializer.validated_data['identity_token']
+
+        try:
+            claims = verify_apple_identity_token(identity_token)
+        except RuntimeError:
+            return Response(
+                {'detail': 'Apple sign-in is not configured on this server.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:  # noqa: BLE001 — any jwt validation failure
+            return Response(
+                {'detail': 'That Apple sign-in could not be verified. Please try again.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        email = (claims.get('email') or '').strip().lower()
+        if not email:
+            return Response(
+                {'detail': 'Your Apple account did not share an email address.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Apple private-relay addresses are real, deliverable inboxes — fine
+        # as the identity. Display name only arrives on the FIRST consent, in
+        # a separate `user` field of the Apple response; the frontend may
+        # pass it along so new accounts do not start anonymous.
+        defaults = {}
+        apple_name = (request.data.get('name') or '').strip()
+        if apple_name:
+            parts = apple_name.split(' ', 1)
+            defaults['first_name'] = parts[0][:150]
+            if len(parts) > 1:
+                defaults['last_name'] = parts[1][:150]
+
+        with transaction.atomic():
+            user, created = User.objects.get_or_create(email=email, defaults=defaults)
+            if created:
+                user.monthly_budget_limit = 0
+                user.set_unusable_password()
+                user.save()
+
+        refresh = TokenObtainPairSerializerForUser.get_token(user)
+        return Response(
+            {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data,
+                'created_account': created,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class TokenObtainPairSerializerForUser:
@@ -533,6 +675,54 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'confidence': parsed.confidence,
             'engine': parsed.engine,
             'notes': parsed.notes,
+            'loyalty_points': [
+                {'points': l.points, 'label': l.label, 'expires_at': l.expires_at}
+                for l in parsed.loyalty
+            ],
+        })
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def extract_text(self, request):
+        """Digital-receipt intake for e-receipts (Uber, Bolt, Takealot, …):
+        paste or forward the receipt TEXT and get back the same structured
+        draft as ocr_extract — merchant, date, total, line items with
+        categories and impulse flags. Nothing is saved; the user reviews
+        the draft in the verification form before saving.
+
+        Body: {"text": "<the receipt contents>"}.
+        """
+        text = (request.data.get('text') or '').strip()
+        if not text:
+            raise ParseError('Send the receipt contents under the "text" field.')
+        if len(text) > 20000:
+            raise ParseError('That receipt text is too long (20000 character limit).')
+
+        category_names = list(Category.objects.values_list('category_name', flat=True))
+        try:
+            parsed = analyze_receipt_text(text, category_names)
+        except Exception as exc:  # noqa: BLE001 — extraction failures shouldn't 500 the app
+            return Response(
+                {'detail': f'Could not read this receipt text: {exc}'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        serializer = OCRExtractResultSerializer({
+            'merchant_name': parsed.merchant_name,
+            'purchase_date': parsed.purchase_date,
+            'total_amount': parsed.total_amount,
+            'channel_type': parsed.channel_type,
+            'items': [
+                {'name': i.name, 'price': i.price, 'category': i.category, 'is_impulse': i.is_impulse}
+                for i in parsed.items
+            ],
+            'raw_text': parsed.raw_text,
+            'confidence': parsed.confidence,
+            'engine': parsed.engine,
+            'notes': parsed.notes,
+            'loyalty_points': [
+                {'points': l.points, 'label': l.label, 'expires_at': l.expires_at}
+                for l in parsed.loyalty
+            ],
         })
         return Response(serializer.data)
 
@@ -549,6 +739,53 @@ class ReceiptViewSet(viewsets.ModelViewSet):
         filename = f'smartspend-audit-{year}-{month:02d}.pdf'
         response['Content-Disposition'] = f'attachment; filename=\"{filename}\"'
         return response
+
+
+class LoyaltyPointsViewSet(viewsets.ReadOnlyModelViewSet):
+    """Spendable loyalty points per store (Smart Shopper, ClubCard, …).
+
+    GET /api/points/            — all of the user's points, soonest expiry first
+    GET /api/points/?active=1   — only unexpired (or never-expiring) points
+    GET /api/points/?store=<id> — one store's points
+    """
+
+    serializer_class = LoyaltyDraftSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        # Default view = points the user can still use today. ?include_expired=1
+        # brings back lapsed blocks (handy for history); ?active=1 stays as an
+        # explicit alias for the same behaviour.
+        today = timezone.now().date()
+        queryset = LoyaltyPoints.objects.filter(user=self.request.user)
+        include_expired = (
+            self.request.query_params.get('include_expired') == '1'
+            and self.request.query_params.get('active') != '1'
+        )
+        if not include_expired:
+            queryset = queryset.filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gte=today)
+            )
+        store_id = self.request.query_params.get('store')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+        return queryset.select_related('store')
+
+    def list(self, request, *args, **kwargs):
+        # Custom shape: flat rows with the fields the Points page renders.
+        rows = [
+            {
+                'points_id': p.points_id,
+                'store_id': p.store_id,
+                'store_name': p.store.store_name,
+                'label': p.label,
+                'points': p.points,
+                'expires_at': p.expires_at,
+                'created_at': p.created_at,
+            }
+            for p in self.get_queryset()
+        ]
+        return Response({'count': len(rows), 'results': rows})
 
 
 class ReceiptItemViewSet(viewsets.ModelViewSet):

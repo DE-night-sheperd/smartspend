@@ -14,7 +14,6 @@ export default function Register() {
     first_name: '',
     last_name: '',
     password: '',
-    monthly_budget_limit: '3000',
   });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -78,16 +77,6 @@ export default function Register() {
             value={form.password}
             onChange={(e) => update('password', e.target.value)}
             required
-          />
-        </label>
-        <label>
-          Monthly budget limit (R)
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={form.monthly_budget_limit}
-            onChange={(e) => update('monthly_budget_limit', e.target.value)}
           />
         </label>
         {error && <p className="form-error">{error}</p>}

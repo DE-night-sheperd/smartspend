@@ -6,13 +6,16 @@ Run with: python manage.py test core
 from datetime import date
 from decimal import Decimal
 
+import jwt
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from .models import Category, LoginCode, Receipt, ReceiptItem, Store
+from unittest import mock
+
+from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
 
 User = get_user_model()
 
@@ -370,3 +373,275 @@ class ReceiptSearchExportTests(TestCase):
     def test_csv_export_requires_auth(self):
         anon = APIClient()
         self.assertEqual(anon.get(reverse('receipt-export-csv')).status_code, 401)
+
+
+class WhatsappCodeLoginTest(TestCase):
+    """WhatsApp OTP: same LoginCode model, rate limit and identity rules
+    as SMS — only the delivery channel differs (Telnyx type=whatsapp)."""
+
+    def test_request_code_without_key_returns_dev_code(self):
+        client = APIClient()
+        with override_settings(TELNYX_API_KEY=''):
+            response = client.post(
+                reverse('request_login_code_whatsapp'),
+                {'phone': '082 123 4567'},
+                format='json',
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['transport'], 'dev')
+        self.assertIn('dev_code', response.data)
+        # Normalized to E.164 exactly like the SMS channel.
+        self.assertTrue(LoginCode.objects.filter(email='+27821234567').exists())
+
+    def test_verify_creates_account_and_sets_phone(self):
+        client = APIClient()
+        with override_settings(TELNYX_API_KEY=''):
+            client.post(
+                reverse('request_login_code_whatsapp'), {'phone': '0837771234'}, format='json'
+            )
+        code = LoginCode.objects.get(email='+27837771234').code
+        response = client.post(
+            reverse('verify_login_code_whatsapp'),
+            {'phone': '0837771234', 'code': code},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+        self.assertTrue(response.data['created_account'])
+        user = User.objects.get(email='+27837771234')
+        self.assertEqual(user.phone, '+27837771234')
+
+    def test_wrong_code_rejected(self):
+        client = APIClient()
+        with override_settings(TELNYX_API_KEY=''):
+            client.post(
+                reverse('request_login_code_whatsapp'), {'phone': '+27821112222'}, format='json'
+            )
+        response = client.post(
+            reverse('verify_login_code_whatsapp'),
+            {'phone': '+27821112222', 'code': '000000'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_rate_limit_shared_with_sms_per_destination(self):
+        # SMS and WhatsApp share the LoginCode table keyed on the normalized
+        # phone, so 5 codes across BOTH channels exhaust the hourly limit.
+        for _ in range(5):
+            response = APIClient().post(
+                reverse('request_login_code_sms'), {'phone': '+27821110000'}, format='json'
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = APIClient().post(
+            reverse('request_login_code_whatsapp'), {'phone': '+27821110000'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class AppleSignInTest(TestCase):
+    """Sign in with Apple: the view only trusts the email claim after the
+    identity token verifies against Apple's keys — verified by mocking the
+    verifier (network-free) and testing the failure paths directly."""
+
+    def test_disabled_without_client_id(self):
+        client = APIClient()
+        with override_settings(APPLE_CLIENT_ID=''):
+            response = client.post(
+                reverse('apple_sign_in'), {'identity_token': 'x' * 40}, format='json'
+            )
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    def test_auth_config_reports_apple_disabled_by_default(self):
+        client = APIClient()
+        with override_settings(APPLE_CLIENT_ID=''):
+            response = client.get(reverse('auth_config'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['apple_enabled'])
+
+    @override_settings(APPLE_CLIENT_ID='com.example.smartspend')
+    def test_valid_token_creates_account_and_signs_in(self):
+        claims = {'email': 'AppleUser@ICloud.com', 'sub': '001234.abcdef.5678'}
+        with mock.patch('core.views.verify_apple_identity_token', return_value=claims):
+            response = APIClient().post(
+                reverse('apple_sign_in'),
+                {'identity_token': 'x' * 60, 'name': 'Thabo Mokoena'},
+                format='json',
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['created_account'])
+        self.assertIn('access', response.data)
+        user = User.objects.get(email='appleuser@icloud.com')
+        self.assertEqual(user.first_name, 'Thabo')
+        self.assertEqual(user.last_name, 'Mokoena')
+
+    @override_settings(APPLE_CLIENT_ID='com.example.smartspend')
+    def test_invalid_token_rejected(self):
+        with mock.patch(
+            'core.views.verify_apple_identity_token',
+            side_effect=jwt.InvalidTokenError('bad signature'),
+        ):
+            response = APIClient().post(
+                reverse('apple_sign_in'), {'identity_token': 'x' * 60}, format='json'
+            )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @override_settings(APPLE_CLIENT_ID='com.example.smartspend')
+    def test_token_without_email_claim_rejected(self):
+        with mock.patch('core.views.verify_apple_identity_token', return_value={'sub': 'x'}):
+            response = APIClient().post(
+                reverse('apple_sign_in'), {'identity_token': 'x' * 60}, format='json'
+            )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class ExtractTextTest(TestCase):
+    """Digital receipts by paste: Uber/Bolt fare e-mails and order
+    summaries POSTed as text, parsed the same way as photo scans."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='extract@example.com', password='pass12345')
+        self.client = auth_client(self.user)
+
+    def test_requires_auth(self):
+        response = APIClient().post(
+            reverse('receipt-extract-text'), {'text': 'Uber trip'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @override_settings(GEMINI_API_KEY='')
+    def test_parses_uber_style_text_without_ai(self):
+        text = (
+            'Uber\n'
+            'Trip Receipt\n'
+            '14 Sep 2026\n'
+            'Trip fare R87.50\n'
+            'Booking fee R12.00\n'
+            'Total R99.50\n'
+        )
+        response = self.client.post(reverse('receipt-extract-text'), {'text': text}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['engine'], 'tesseract')  # regex fallback engine name
+        self.assertEqual(response.data['merchant_name'], 'Uber')
+        self.assertEqual(float(response.data['total_amount']), 99.5)
+        self.assertEqual(response.data['channel_type'], 'Online_Ecommerce')
+
+    def test_empty_text_rejected(self):
+        response = self.client.post(reverse('receipt-extract-text'), {'text': '   '}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(GEMINI_API_KEY='')
+    def test_extract_reports_loyalty_points(self):
+        text = (
+            'Pick n Pay\n'
+            '14 Sep 2026\n'
+            'Milk R24.99\n'
+            'Bread R18.99\n'
+            'Total R43.98\n'
+            'Smart Shopper points 250\n'
+            'Points expire 30 Sep 2026\n'
+        )
+        response = self.client.post(reverse('receipt-extract-text'), {'text': text}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        loyalty = response.data.get('loyalty_points', [])
+        self.assertEqual(len(loyalty), 1)
+        self.assertEqual(loyalty[0]['points'], 250)
+        self.assertEqual(loyalty[0]['label'], 'Smart Shopper')
+        self.assertEqual(loyalty[0]['expires_at'], '2026-09-30')
+
+
+class LoyaltyPointsTest(TestCase):
+    """Points blocks read off slips land in LoyaltyPoints when the receipt
+    is saved, and the /api/points/ endpoint serves them per store."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='points@example.com', password='pass12345')
+        self.client = auth_client(self.user)
+        self.store = Store.objects.create(store_name='Pick n Pay', channel_type=Store.ChannelType.PHYSICAL)
+        self.category = Category.objects.get(category_name='Groceries')
+
+    def _receipt_payload(self, **overrides):
+        payload = {
+            'store_name': 'Pick n Pay',
+            'purchase_date': '2026-09-14',
+            'total_amount': '43.98',
+            'items': [
+                {'item_name': 'Milk', 'unit_price': '24.99', 'quantity': 1, 'category': self.category.category_id},
+            ],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_saving_receipt_with_points_creates_loyalty_rows(self):
+        payload = self._receipt_payload(
+            loyalty_points=[
+                {'points': 250, 'label': 'Smart Shopper points', 'expires_at': '2026-09-30'},
+                {'points': 100, 'label': 'Clicks ClubCard points', 'expires_at': None},
+            ]
+        )
+        response = self.client.post(reverse('receipt-list'), payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        rows = LoyaltyPoints.objects.filter(user=self.user).order_by('points')
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual(rows.last().points, 250)
+        self.assertEqual(rows.last().store.store_name, 'Pick n Pay')
+        self.assertEqual(rows.first().label, 'Clicks ClubCard points')
+
+    def test_points_list_expires_soonest_first_and_active_filter(self):
+        LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=100,
+            label='Soon', expires_at=date(2026, 9, 25),
+        )
+        LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=500,
+            label='Later', expires_at=date(2026, 10, 20),
+        )
+        LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=50,
+            label='Expired', expires_at=date(2026, 9, 1),
+        )
+        response = self.client.get(reverse('loyaltypoints-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 2)  # the lapsed 1 Sep block is hidden by default
+        self.assertEqual(response.data['results'][0]['label'], 'Soon')  # soonest expiry first
+
+        expired = self.client.get(reverse('loyaltypoints-list'), {'include_expired': '1'})
+        self.assertEqual(expired.data['count'], 3)
+
+        active = self.client.get(reverse('loyaltypoints-list'), {'active': '1'})
+        labels = [r['label'] for r in active.data['results']]
+        self.assertEqual(labels, ['Soon', 'Later'])
+
+    def test_points_isolated_per_user(self):
+        other = User.objects.create_user(email='other@example.com', password='pass12345')
+        LoyaltyPoints.objects.create(user=other, store=self.store, points=999)
+        response = self.client.get(reverse('loyaltypoints-list'))
+        self.assertEqual(response.data['count'], 0)
+
+    def test_reminder_command_targets_7_and_1_day_windows(self):
+        from datetime import timedelta
+
+        from django.core import mail
+        from django.utils import timezone
+
+        from core.management.commands.send_points_reminders import Command
+
+        today = timezone.now().date()
+        LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=300,
+            label='Smart Shopper points', expires_at=today + timedelta(days=7),
+        )
+        LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=75,
+            label='ClubCard points', expires_at=today + timedelta(days=1),
+        )
+        LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=40,
+            label='Not yet', expires_at=today + timedelta(days=3),
+        )
+        Command().handle()
+        subjects = [m.subject for m in mail.outbox]
+        self.assertEqual(len(subjects), 2)  # the 7-day and 1-day blocks, not the 3-day
+        joined = '\n'.join(m.body for m in mail.outbox)
+        self.assertIn('300', joined)
+        self.assertIn('75', joined)
+        self.assertNotIn('40', joined)

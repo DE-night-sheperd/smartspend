@@ -1,11 +1,26 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { requestLoginCode, requestSmsCode } from '../api/endpoints';
+import {
+  appleSignIn,
+  getAuthConfig,
+  requestLoginCode,
+  requestSmsCode,
+  requestWhatsappCode,
+} from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
 type Step = 'input' | 'code';
-type Channel = 'email' | 'sms';
+type Channel = 'email' | 'sms' | 'whatsapp';
+
+const APPLE_JS_URL =
+  'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
+
+const CHANNEL_LABELS: Record<Channel, string> = {
+  email: '✉️ Email',
+  sms: '📱 SMS',
+  whatsapp: '💬 WhatsApp',
+};
 
 export default function Login() {
   const { loginWithCode } = useAuth();
@@ -20,15 +35,29 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [appleEnabled, setAppleEnabled] = useState(false);
 
   const destination = channel === 'email' ? email : phone;
+
+  useEffect(() => {
+    // The Apple button only appears when the backend has APPLE_CLIENT_ID
+    // configured — an unconfigured button would just fail.
+    getAuthConfig()
+      .then((config) => setAppleEnabled(config.apple_enabled))
+      .catch(() => setAppleEnabled(false));
+  }, []);
 
   async function handleRequestCode(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const result = channel === 'email' ? await requestLoginCode(email) : await requestSmsCode(phone);
+      const result =
+        channel === 'email'
+          ? await requestLoginCode(email)
+          : channel === 'sms'
+            ? await requestSmsCode(phone)
+            : await requestWhatsappCode(phone);
       setDevCode(result.dev_code ?? null);
       setStep('code');
     } catch (err: unknown) {
@@ -62,12 +91,55 @@ export default function Login() {
     }
   }
 
+  async function handleAppleSignIn() {
+    setError(null);
+    setBusy(true);
+    try {
+      const w = window as unknown as { AppleID?: { auth: { init: (o: object) => void; signIn: () => Promise<AppleAuthResponse> } } };
+      if (!w.AppleID) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = APPLE_JS_URL;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Could not load Apple sign-in.'));
+          document.head.appendChild(script);
+        });
+      }
+      w.AppleID!.auth.init({
+        clientId: import.meta.env.VITE_APPLE_CLIENT_ID ?? '',
+        scope: 'name email',
+        redirectURI: window.location.origin + '/login',
+        usePopup: true,
+      });
+      const response = await w.AppleID!.auth.signIn();
+      const appleName = response.user?.name
+        ? `${response.user.name.firstName ?? ''} ${response.user.name.lastName ?? ''}`.trim()
+        : undefined;
+      const created = await appleSignIn(response.authorization.id_token, appleName || undefined);
+      navigate(created ? '/settings' : returnTo, { replace: true });
+    } catch (err: unknown) {
+      // Closing the popup is the user changing their mind, not an error.
+      if ((err as { error?: string })?.error === 'popup_closed_by_user') {
+        setBusy(false);
+        return;
+      }
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        (err as { message?: string })?.message ??
+        'Apple sign-in did not go through. Try again.';
+      setError(detail);
+      setBusy(false);
+    }
+  }
+
   function switchChannel(next: Channel) {
     if (next === channel) return;
     setChannel(next);
     setError(null);
     setStep('input');
   }
+
+  const channelNoun = channel === 'email' ? 'inbox' : 'messages';
 
   return (
     <div className="auth-page">
@@ -82,27 +154,21 @@ export default function Login() {
           <form className="auth-card" onSubmit={handleRequestCode}>
             <span className="auth-brand">R:</span>
             <h1>Log in to SmartSpend</h1>
-            <p className="auth-lede">One-time code, no password. Email or SMS — your pick.</p>
+            <p className="auth-lede">One-time code, no password. Email, SMS or WhatsApp.</p>
 
             <div className="channel-toggle" role="tablist" aria-label="Login method">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={channel === 'email'}
-                className={channel === 'email' ? 'active' : ''}
-                onClick={() => switchChannel('email')}
-              >
-                ✉️ Email
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={channel === 'sms'}
-                className={channel === 'sms' ? 'active' : ''}
-                onClick={() => switchChannel('sms')}
-              >
-                📱 SMS
-              </button>
+              {(Object.keys(CHANNEL_LABELS) as Channel[]).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  role="tab"
+                  aria-selected={channel === c}
+                  className={channel === c ? 'active' : ''}
+                  onClick={() => switchChannel(c)}
+                >
+                  {CHANNEL_LABELS[c]}
+                </button>
+              ))}
             </div>
 
             {channel === 'email' ? (
@@ -133,8 +199,25 @@ export default function Login() {
             {error && <p className="form-error">{error}</p>}
 
             <button type="submit" disabled={busy}>
-              {busy ? 'Sending code…' : channel === 'email' ? 'Email me a login code' : 'Text me a login code'}
+              {busy
+                ? 'Sending code…'
+                : channel === 'email'
+                  ? 'Email me a login code'
+                  : channel === 'sms'
+                    ? 'Text me a login code'
+                    : 'WhatsApp me a login code'}
             </button>
+
+            {appleEnabled && (
+              <>
+                <div className="auth-divider" aria-hidden="true">
+                  <span>or</span>
+                </div>
+                <button type="button" className="apple-button" onClick={handleAppleSignIn} disabled={busy}>
+                   Apple | Continue with Apple
+                </button>
+              </>
+            )}
 
             <p className="auth-switch">
               New here? <Link to="/register">Create an account</Link>
@@ -144,7 +227,7 @@ export default function Login() {
           </form>
         ) : (
           <form className="auth-card" onSubmit={handleVerify}>
-            <h1>{channel === 'email' ? 'Check your inbox' : 'Check your messages'}</h1>
+            <h1>Check your {channelNoun}</h1>
             <p className="auth-lede">
               We sent a 6-digit code to <strong>{destination}</strong>. It expires in 10 minutes.
             </p>
@@ -187,4 +270,9 @@ export default function Login() {
       </motion.div>
     </div>
   );
+}
+
+interface AppleAuthResponse {
+  authorization: { id_token: string; code: string };
+  user?: { name?: { firstName?: string; lastName?: string }; email?: string };
 }

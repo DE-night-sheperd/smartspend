@@ -1315,3 +1315,76 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   color: var(--ink-soft); text-decoration: none; font-size: 0.85rem;
 }
 .footer-link:hover { color: var(--ink); text-decoration: underline; }
+
+/* ---------- login: apple + channels ---------- */
+.auth-divider {
+  display: flex; align-items: center; gap: 0.7rem;
+  margin: 0.9rem 0 0.7rem; color: var(--ink-soft);
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--line, rgba(22, 35, 28, 0.15));
+}
+.apple-button {
+  width: 100%; background: #16231c; color: #f6efd9;
+  border: none; border-radius: 10px; padding: 0.75rem 1rem;
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.apple-button:hover:not(:disabled) { background: #23392e; }
+.apple-button:disabled { opacity: 0.6; cursor: wait; }
+
+/* ---------- receipts: paste e-receipt ---------- */
+.paste-panel {
+  background: var(--paper-raise, #fffdf5);
+  border: 1px dashed rgba(22, 35, 28, 0.35);
+  border-radius: 12px; padding: 1rem 1.1rem; margin: 0.6rem 0 1.2rem;
+}
+.paste-panel label { display: block; font-size: 0.85rem; font-weight: 600; }
+.paste-panel textarea {
+  width: 100%; margin-top: 0.45rem; padding: 0.7rem 0.8rem;
+  font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
+  border: 1px solid rgba(22, 35, 28, 0.25); border-radius: 10px;
+  background: #fffdf5; color: var(--ink); resize: vertical;
+}
+.paste-actions { display: flex; gap: 0.6rem; margin-top: 0.7rem; }
+
+/* ---------- points page ---------- */
+.points-alert {
+  background: #fff3cd; border: 1px solid #e0c36a; color: #6b4d00;
+  border-radius: 10px; padding: 0.7rem 1rem; margin: 0.4rem 0 1rem; font-size: 0.9rem;
+}
+.points-total { font-size: 0.95rem; color: var(--ink-soft); margin: 0.2rem 0 1rem; }
+.points-total strong { color: var(--ink); font-family: var(--font-mono); font-size: 1.1rem; }
+.points-store {
+  background: var(--paper-raise, #fffdf5); border: 1px solid rgba(22, 35, 28, 0.12);
+  border-radius: 12px; padding: 0.9rem 1.1rem; margin-bottom: 0.9rem;
+}
+.points-store h2 { margin: 0 0 0.6rem; font-size: 1rem; }
+.points-row {
+  display: flex; align-items: center; gap: 0.9rem; padding: 0.55rem 0;
+  border-top: 1px dashed rgba(22, 35, 28, 0.12);
+}
+.points-row:first-of-type { border-top: none; }
+.points-amount {
+  font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; min-width: 5.2rem;
+}
+.points-unit { font-size: 0.72rem; font-weight: 400; color: var(--ink-soft); margin-left: 0.25rem; }
+.points-label { flex: 1; font-size: 0.9rem; color: var(--ink-soft); }
+.points-badge {
+  font-size: 0.72rem; padding: 0.2rem 0.55rem; border-radius: 999px; white-space: nowrap;
+}
+.points-ok { background: #e3f0e5; color: #1e5c2e; }
+.points-warn { background: #fdeeca; color: #7a5200; }
+.points-critical { background: #fde2e0; color: #8c1d18; }
+.points-expired-toggle { display: flex; align-items: center; gap: 0.45rem; margin-top: 1rem; font-size: 0.85rem; color: var(--ink-soft); }
+
+/* ---------- receipt form: loyalty chips ---------- */
+.loyalty-draft {
+  display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center;
+  margin: 0 0 0.9rem;
+}
+.loyalty-draft-title { font-size: 0.82rem; font-weight: 600; }
+.loyalty-chip {
+  font-size: 0.78rem; background: #e3f0e5; color: #1e5c2e;
+  border-radius: 999px; padding: 0.22rem 0.65rem;
+}
