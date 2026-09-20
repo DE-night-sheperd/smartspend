@@ -16,6 +16,7 @@ backend/media/
 # Node / Vite
 node_modules/
 dist/
+isolate/
 *.tsbuildinfo
 
 # OS / editor
