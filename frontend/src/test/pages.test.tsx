@@ -119,8 +119,9 @@ describe('Points page', () => {
 
 describe('Settings page', () => {
   it('keeps the budget limit inside profile settings, after the profile fields', async () => {
-    const { getMe } = await import('../api/endpoints');
+    const { getMe, getGeminiKeyStatus } = await import('../api/endpoints');
     vi.mocked(getMe).mockResolvedValue(me);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: false, key_hint: '' });
     tokenStore.setTokens('access', 'refresh');
 
     // Mirror ProtectedRoute: Settings only mounts once auth has resolved.
@@ -145,5 +146,44 @@ describe('Settings page', () => {
     const profile = screen.getByRole('heading', { name: 'Profile' });
     const budget = screen.getByRole('heading', { name: 'Budget' });
     expect(profile.compareDocumentPosition(budget) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('offers the BYOK Gemini connect flow when not connected', async () => {
+    const { getMe, getGeminiKeyStatus } = await import('../api/endpoints');
+    vi.mocked(getMe).mockResolvedValue(me);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: false, key_hint: '' });
+    tokenStore.setTokens('access', 'refresh');
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Settings />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'AI scanning (Gemini)' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Get your free key at Google AI Studio/ }),
+    ).toHaveAttribute('href', 'https://aistudio.google.com/app/apikey');
+    expect(screen.getByLabelText(/Paste your Gemini API key/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect Gemini' })).toBeInTheDocument();
+  });
+
+  it('shows the connected state with a masked key hint and disconnect action', async () => {
+    const { getMe, getGeminiKeyStatus } = await import('../api/endpoints');
+    vi.mocked(getMe).mockResolvedValue(me);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: true, key_hint: 'AIzaS…9f2c' });
+    tokenStore.setTokens('access', 'refresh');
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Settings />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/Connected · AIzaS…9f2c/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect Gemini' })).not.toBeInTheDocument();
   });
 });

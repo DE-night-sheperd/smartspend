@@ -6,6 +6,9 @@ from .views import (
     AppleSignInView,
     AuthConfigView,
     CategoryViewSet,
+    GeminiKeyConnectView,
+    GeminiKeyDisconnectView,
+    GeminiKeyStatusView,
     LoyaltyPointsViewSet,
     MeView,
     ReceiptItemViewSet,
@@ -40,5 +43,8 @@ urlpatterns = [
     path('auth/config/', AuthConfigView.as_view(), name='auth_config'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('me/', MeView.as_view(), name='me'),
+    path('me/gemini-key/', GeminiKeyStatusView.as_view(), name='gemini_key_status'),
+    path('me/gemini-key/connect/', GeminiKeyConnectView.as_view(), name='gemini_key_connect'),
+    path('me/gemini-key/disconnect/', GeminiKeyDisconnectView.as_view(), name='gemini_key_disconnect'),
     path('', include(router.urls)),
 ]

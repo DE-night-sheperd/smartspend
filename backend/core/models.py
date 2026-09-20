@@ -37,6 +37,10 @@ class User(AbstractUser):
     phone = models.CharField(max_length=32, blank=True, help_text='E.164 number, e.g. +27821234567')
     user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     monthly_budget_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    gemini_key_encrypted = models.TextField(
+        blank=True, default='', editable=False,
+        help_text='The user\'s own Gemini API key (BYOK), Fernet-encrypted at rest.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = UserManager()
@@ -46,6 +50,26 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    # --- Bring-your-own Gemini key (BYOK) --------------------------------
+    @property
+    def gemini_key(self) -> str:
+        """The user's decrypted Gemini API key ('' when not connected)."""
+        from .crypto import decrypt
+
+        return decrypt(self.gemini_key_encrypted)
+
+    @property
+    def has_gemini_key(self) -> bool:
+        return bool(self.gemini_key)
+
+    def set_gemini_key(self, raw_key: str) -> None:
+        from .crypto import encrypt
+
+        self.gemini_key_encrypted = encrypt(raw_key.strip())
+
+    def clear_gemini_key(self) -> None:
+        self.gemini_key_encrypted = ''
 
 
 class Store(models.Model):

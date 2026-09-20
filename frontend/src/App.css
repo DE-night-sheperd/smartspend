@@ -1388,3 +1388,21 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   font-size: 0.78rem; background: #e3f0e5; color: #1e5c2e;
   border-radius: 999px; padding: 0.22rem 0.65rem;
 }
+
+/* ---------- BYOK Gemini (settings card + dashboard banner) ---------- */
+.gemini-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+  background: #e8f1fb; border: 1px solid #a9c8ea; color: #1c3a5e;
+  border-radius: 10px; padding: 0.65rem 0.9rem; margin: 0.4rem 0 1rem; font-size: 0.9rem;
+}
+.gemini-banner a { color: inherit; font-weight: 600; }
+.gemini-connect { display: flex; flex-direction: column; gap: 0.7rem; margin-top: 0.7rem; }
+.gemini-connect label { font-size: 0.88rem; font-weight: 600; }
+.gemini-connect input {
+  margin-top: 0.35rem; width: 100%; box-sizing: border-box;
+  padding: 0.55rem 0.7rem; font-family: var(--font-mono); font-size: 0.85rem;
+  border: 1.5px solid var(--line); border-radius: 8px; background: #fffdf5; color: var(--ink);
+}
+.gemini-connect button { align-self: flex-start; }
+.gemini-studio-link { font-size: 0.88rem; color: var(--indigo); font-weight: 600; }
+.gemini-status { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.7rem; flex-wrap: wrap; }

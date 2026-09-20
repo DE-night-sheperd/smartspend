@@ -124,6 +124,18 @@ export interface LoyaltyPointsRow {
   created_at: string;
 }
 
+/** BYOK Gemini connection status — never contains the key itself. */
+export interface GeminiKeyStatus {
+  connected: boolean;
+  key_hint: string;
+}
+
+export interface GeminiKeyConnectResult {
+  detail: string;
+  connected: boolean;
+  key_hint: string;
+}
+
 export interface Paginated<T> {
   count: number;
   next: string | null;

@@ -176,12 +176,12 @@ def _read_bytes(file) -> bytes:
         return f.read()
 
 
-def _gemini_extract(data: bytes, mime_type: str, category_names: list[str]) -> dict:
+def _gemini_extract(data: bytes, mime_type: str, category_names: list[str], api_key: str | None = None) -> dict:
     """Call Gemini with the raw photo and parse its JSON reply.
 
     One automatic retry (2s backoff) absorbs transient 429/5xx responses —
     e.g. the free tier's per-minute rate limit when scans come in bursts."""
-    api_key = getattr(settings, 'GEMINI_API_KEY', '')
+    api_key = api_key or getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
         raise RuntimeError('GEMINI_API_KEY not configured')
 
@@ -249,10 +249,79 @@ def _mime_from_name(name: str) -> str:
     return 'image/jpeg'
 
 
-def analyze_receipt(file, category_names: list[str] | None = None) -> ParsedReceipt:
-    """Extract structured receipt data: Gemini first, Tesseract fallback."""
+def verify_gemini_key(api_key: str) -> tuple[bool, str]:
+    """Check a candidate Gemini API key by listing models (free, no tokens).
+
+    Returns (ok, message). ok=True means Google accepted the key. A network
+    failure returns ok=False with a transient-error message so the caller
+    doesn't store an unverified key on a flaky connection.
+    """
+    try:
+        resp = requests.get(
+            'https://generativelanguage.googleapis.com/v1beta/models',
+            params={'key': api_key, 'pageSize': 1},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return False, 'Could not reach Google to verify the key. Check your connection and try again.'
+    if resp.status_code == 200:
+        return True, 'Connected — your scans will use your own Gemini key.'
+    if resp.status_code in (400, 401, 403):
+        return False, 'Google rejected that key. Double-check you copied the whole key from AI Studio.'
+    return False, f'Google answered HTTP {resp.status_code} while verifying the key. Try again shortly.'
+
+
+def _parsed_from_gemini(raw: dict, user_key_hint: str | None = None) -> ParsedReceipt:
+    """Map a successful Gemini reply onto a ParsedReceipt."""
+    items = [
+        ParsedItem(
+            name=str(i.get('name', 'Item'))[:255],
+            price=round(float(i.get('price') or 0), 2),
+            category=(i.get('category') or None),
+            is_impulse=bool(i.get('is_impulse')),
+        )
+        for i in (raw.get('items') or [])
+        if i.get('name')
+    ]
+    total = raw.get('total')
+    channel = raw.get('channel')
+    return ParsedReceipt(
+        raw_text=json.dumps(raw, indent=2),
+        merchant_name=raw.get('merchant'),
+        purchase_date=raw.get('date'),
+        total_amount=round(float(total), 2) if total is not None else None,
+        channel_type=channel if channel in ('Physical_Store', 'Online_Ecommerce') else None,
+        items=items,
+        loyalty=_loyalty_from_raw(raw),
+        confidence=float(raw.get('confidence') or 0.8),
+        engine='gemini',
+        notes=['Read with your own Gemini key.'] if user_key_hint else [],
+    )
+
+
+def analyze_receipt(file, category_names: list[str] | None = None, user_key: str | None = None) -> ParsedReceipt:
+    """Extract structured receipt data: Gemini first, Tesseract fallback.
+
+    user_key (BYOK): when the requesting user has connected their own
+    Gemini key it takes priority over the server's shared key, so their
+    scans bill against their own free tier instead of the app's quota.
+    """
     data = _read_bytes(file)
     notes: list[str] = []
+
+    if user_key:
+        try:
+            raw = _gemini_extract(
+                data,
+                _mime_from_name(getattr(file, 'name', '')),
+                category_names or [],
+                api_key=user_key,
+            )
+            parsed = _parsed_from_gemini(raw, user_key_hint='user')
+            return parsed
+        except Exception as exc:  # noqa: BLE001 — a broken user key must never block a scan
+            logger.warning('User Gemini key failed, falling back: %s', exc)
+            notes.append('Your connected Gemini key could not read this slip — used the built-in engine instead.')
 
     if getattr(settings, 'GEMINI_API_KEY', ''):
         try:
@@ -260,31 +329,11 @@ def analyze_receipt(file, category_names: list[str] | None = None) -> ParsedRece
                 data,
                 _mime_from_name(getattr(file, 'name', '')),
                 category_names or [],
+                api_key=settings.GEMINI_API_KEY,
             )
-            items = [
-                ParsedItem(
-                    name=str(i.get('name', 'Item'))[:255],
-                    price=round(float(i.get('price') or 0), 2),
-                    category=(i.get('category') or None),
-                    is_impulse=bool(i.get('is_impulse')),
-                )
-                for i in (raw.get('items') or [])
-                if i.get('name')
-            ]
-            total = raw.get('total')
-            channel = raw.get('channel')
-            return ParsedReceipt(
-                raw_text=json.dumps(raw, indent=2),
-                merchant_name=raw.get('merchant'),
-                purchase_date=raw.get('date'),
-                total_amount=round(float(total), 2) if total is not None else None,
-                channel_type=channel if channel in ('Physical_Store', 'Online_Ecommerce') else None,
-                items=items,
-                loyalty=_loyalty_from_raw(raw),
-                confidence=float(raw.get('confidence') or 0.8),
-                engine='gemini',
-                notes=notes,
-            )
+            parsed = _parsed_from_gemini(raw)
+            parsed.notes = notes
+            return parsed
         except Exception as exc:  # noqa: BLE001 — any Gemini failure degrades to OCR
             logger.warning('Gemini receipt extraction failed, falling back to Tesseract: %s', exc)
             notes.append('AI read failed — used on-device OCR instead.')
@@ -472,16 +521,50 @@ def _fallback_text_parse(text: str) -> dict:
     }
 
 
-def analyze_receipt_text(text: str, category_names: list[str] | None = None) -> ParsedReceipt:
+def analyze_receipt_text(text: str, category_names: list[str] | None = None, user_key: str | None = None) -> ParsedReceipt:
     """Parse pasted digital-receipt text (Uber/Bolt fare e-mails, order
     summaries, invoice copies). Gemini when configured, regex fallback
     otherwise — the feature always returns a draft the user can correct.
+
+    user_key (BYOK): the requesting user's own Gemini key, tried first.
     """
     text = (text or '').strip()
     notes: list[str] = []
 
     if not text:
         return ParsedReceipt(raw_text='', confidence=0.0, engine='gemini', notes=['No text provided.'])
+
+    if user_key:
+        try:
+            api_key = user_key
+            model = getattr(settings, 'GEMINI_MODEL', DEFAULT_GEMINI_MODEL)
+            categories = ', '.join(category_names[:30]) if category_names else 'Groceries, Transport, Fast Food, Other'
+            body = {
+                'contents': [{'parts': [{'text': TEXT_PROMPT_TEMPLATE.format(categories=categories) + '\n\nReceipt text:\n' + text[:20000]}]}],
+                'generationConfig': {'temperature': 0.1, 'response_mime_type': 'application/json'},
+            }
+            resp = requests.post(
+                GEMINI_ENDPOINT.format(model=model),
+                params={'key': api_key},
+                headers={'Content-Type': 'application/json'},
+                json=body,
+                timeout=45,
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f'Gemini HTTP {resp.status_code}: {resp.text[:200]}')
+            payload = resp.json()
+            reply = ''.join(
+                part.get('text', '')
+                for part in payload.get('candidates', [{}])[0].get('content', {}).get('parts', [])
+            )
+            reply = re.sub(r'^```(?:json)?|```$', '', reply.strip(), flags=re.MULTILINE).strip()
+            raw = json.loads(reply)
+            parsed = _parsed_from_gemini(raw, user_key_hint='user')
+            parsed.raw_text = text
+            return parsed
+        except Exception as exc:  # noqa: BLE001 — a broken user key must never block a paste-parse
+            logger.warning('User Gemini key failed on text extraction, falling back: %s', exc)
+            notes.append('Your connected Gemini key could not read this receipt — used the built-in engine instead.')
 
     if getattr(settings, 'GEMINI_API_KEY', ''):
         try:

@@ -1,6 +1,8 @@
 import { api, API_BASE_URL, tokenStore } from './client';
 import type {
   Category,
+  GeminiKeyConnectResult,
+  GeminiKeyStatus,
   LoyaltyPointsRow,
   MonthBreakdown,
   MonthlyAnalytics,
@@ -93,6 +95,27 @@ export async function listPoints(includeExpired = false): Promise<LoyaltyPointsR
  * summaries) and get the same structured draft as a photo scan. */
 export async function extractReceiptText(text: string): Promise<OcrDraft> {
   const { data } = await api.post<OcrDraft>('/receipts/extract_text/', { text });
+  return data;
+}
+
+// --- Bring-your-own Gemini key (BYOK) --------------------------------------
+// Google has no OAuth flow that mints Gemini keys for third-party apps, so
+// the user creates their free key at AI Studio and pastes it once; scans
+// then use their own key/quota. Keys are stored encrypted server-side and
+// are never returned to the client.
+
+export async function getGeminiKeyStatus(): Promise<GeminiKeyStatus> {
+  const { data } = await api.get<GeminiKeyStatus>('/me/gemini-key/');
+  return data;
+}
+
+export async function connectGeminiKey(apiKey: string): Promise<GeminiKeyConnectResult> {
+  const { data } = await api.post<GeminiKeyConnectResult>('/me/gemini-key/connect/', { api_key: apiKey });
+  return data;
+}
+
+export async function disconnectGeminiKey(): Promise<{ connected: boolean }> {
+  const { data } = await api.post<{ connected: boolean }>('/me/gemini-key/disconnect/');
   return data;
 }
 

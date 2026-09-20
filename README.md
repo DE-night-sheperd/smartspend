@@ -43,15 +43,24 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   first, and flags anything lapsing within 7 days. The dashboard shows
   the same warning, and `python manage.py send_points_reminders` emails
   users whose points expire in exactly 7 days or 1 day (cron-friendly).
+- **Bring-your-own Gemini key (BYOK)** (`/api/me/gemini-key/`): Google
+  only issues Gemini API keys inside each user's own AI Studio account —
+  there is no OAuth flow a third-party app can use to mint one — so the
+  app prompts users to connect their own free key: paste it in Settings,
+  it's verified against Google and stored Fernet-encrypted at rest
+  (never returned by any endpoint), and from then on their scans bill to
+  their quota first, falling back to the server key, then OCR. The
+  dashboard nudges until connected, and disconnecting removes the key.
 - **Digital receipts by paste** (`POST /api/receipts/extract_text/`):
   e-receipts that never touch paper — Uber and Bolt trip fares, online
   order summaries, invoice copies — are pasted as text and parsed into
   the same structured draft as a photo scan.
-- **Backend test suite** (`python manage.py test core`): 45 tests covering
+- **Backend test suite** (`python manage.py test core`): 52 tests covering
   email-, SMS-, WhatsApp- and Apple-code auth, receipt CRUD + per-user
   isolation, category match-or-create, loyalty-points extraction and
-  expiry reminders, digital-receipt parsing, analytics math, and
-  default-category seeding
+  expiry reminders, digital-receipt parsing, BYOK Gemini keys (connect/
+  status/disconnect, encryption at rest, scan priority), analytics math,
+  and default-category seeding
 - Full CRUD on stores/categories/receipts/receipt-items via DRF ViewSets
   (receipts support full edit — replace line items, store, date, total — and
   delete)
