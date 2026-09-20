@@ -27,6 +27,16 @@ def auth_client(user):
     return client
 
 
+# Hermetic suite: no provider keys, alphanumeric sender — every login code
+# takes the dev/console path and nothing real is ever sent from a test run.
+NO_LIVE_DELIVERY = override_settings(
+    RESEND_API_KEY='',
+    TELNYX_API_KEY='',
+    TELNYX_FROM='SmartSpend',
+)
+
+
+@NO_LIVE_DELIVERY
 class DefaultCategoriesTest(TestCase):
     def test_seed_migration_created_defaults(self):
         names = set(Category.objects.values_list('category_name', flat=True))
@@ -39,6 +49,7 @@ class DefaultCategoriesTest(TestCase):
         self.assertFalse(Category.objects.get(category_name='Snacks & Drinks').is_essential)
 
 
+@NO_LIVE_DELIVERY
 class AuthCodeLoginTest(TestCase):
     def test_request_code_creates_code(self):
         response = self.client.post(
@@ -101,6 +112,7 @@ class AuthCodeLoginTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+@NO_LIVE_DELIVERY
 class SmsCodeLoginTest(TestCase):
     """POST /api/auth/login-code/sms/ + /api/auth/verify-login-code/sms/ —
     the phone-based twin of the email flow. Without TELNYX_API_KEY the
@@ -160,6 +172,7 @@ class SmsCodeLoginTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+@NO_LIVE_DELIVERY
 class ReceiptCrudAndIsolationTest(TestCase):
     def setUp(self):
         self.alice = User.objects.create_user(email='alice@x.com', password='pass-12345678')
@@ -258,6 +271,7 @@ class ReceiptCrudAndIsolationTest(TestCase):
         self.assertFalse(Receipt.objects.filter(pk=self.receipt.pk).exists())
 
 
+@NO_LIVE_DELIVERY
 class MonthlyAnalyticsTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -318,6 +332,7 @@ def make_store(name):
     return Store.objects.create(store_name=name, channel_type=Store.ChannelType.PHYSICAL)
 
 
+@NO_LIVE_DELIVERY
 class ReceiptSearchExportTests(TestCase):
     """Search/filter/order params on the receipts list + the CSV export."""
 
@@ -375,6 +390,7 @@ class ReceiptSearchExportTests(TestCase):
         self.assertEqual(anon.get(reverse('receipt-export-csv')).status_code, 401)
 
 
+@NO_LIVE_DELIVERY
 class WhatsappCodeLoginTest(TestCase):
     """WhatsApp OTP: same LoginCode model, rate limit and identity rules
     as SMS — only the delivery channel differs (Telnyx type=whatsapp)."""
@@ -438,6 +454,7 @@ class WhatsappCodeLoginTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+@NO_LIVE_DELIVERY
 class AppleSignInTest(TestCase):
     """Sign in with Apple: the view only trusts the email claim after the
     identity token verifies against Apple's keys — verified by mocking the
@@ -457,6 +474,24 @@ class AppleSignInTest(TestCase):
             response = client.get(reverse('auth_config'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['apple_enabled'])
+
+    def test_auth_config_sms_flags_reflect_sender_configuration(self):
+        """SMS/WhatsApp channel flags are only true when a real E.164 sender
+        number is configured — a Telnyx key alone cannot deliver SMS."""
+        client = APIClient()
+        with override_settings(TELNYX_API_KEY='', TELNYX_FROM='SmartSpend'):
+            response = client.get(reverse('auth_config'))
+        self.assertFalse(response.data['sms_enabled'])
+        self.assertFalse(response.data['whatsapp_enabled'])
+
+        with override_settings(TELNYX_API_KEY='KEYtest', TELNYX_FROM='SmartSpend'):
+            response = client.get(reverse('auth_config'))
+        self.assertFalse(response.data['sms_enabled'])  # alphanumeric sender can't SMS
+
+        with override_settings(TELNYX_API_KEY='KEYtest', TELNYX_FROM='+27601234567'):
+            response = client.get(reverse('auth_config'))
+        self.assertTrue(response.data['sms_enabled'])
+        self.assertTrue(response.data['whatsapp_enabled'])
 
     @override_settings(APPLE_CLIENT_ID='com.example.smartspend')
     def test_valid_token_creates_account_and_signs_in(self):
@@ -494,6 +529,7 @@ class AppleSignInTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+@NO_LIVE_DELIVERY
 class ExtractTextTest(TestCase):
     """Digital receipts by paste: Uber/Bolt fare e-mails and order
     summaries POSTed as text, parsed the same way as photo scans."""
@@ -549,6 +585,7 @@ class ExtractTextTest(TestCase):
         self.assertEqual(loyalty[0]['expires_at'], '2026-09-30')
 
 
+@NO_LIVE_DELIVERY
 class LoyaltyPointsTest(TestCase):
     """Points blocks read off slips land in LoyaltyPoints when the receipt
     is saved, and the /api/points/ endpoint serves them per store."""
@@ -647,6 +684,7 @@ class LoyaltyPointsTest(TestCase):
         self.assertNotIn('40', joined)
 
 
+@NO_LIVE_DELIVERY
 class GeminiByokTest(TestCase):
     """Bring-your-own Gemini key: connect (verified + encrypted at rest),
     status, disconnect, and scan priority (user key before the server's)."""
