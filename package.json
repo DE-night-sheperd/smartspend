@@ -10,10 +10,16 @@
     "test": "cd backend && python3 manage.py test core && cd ../frontend && npm test"
   },
   "dependencies": {
+    "axios": "^1.19.0",
+    "canvas-confetti": "^1.9.4",
+    "framer-motion": "^13.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
