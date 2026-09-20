@@ -33,7 +33,7 @@ function Probe({ path }: { path: string }) {
 // capability flags on mount; give the auto-mock a real resolution so the
 // effect doesn't crash the tree under test.
 beforeEach(() => {
-  vi.mocked(getAuthConfig).mockResolvedValue({ apple_enabled: false });
+  vi.mocked(getAuthConfig).mockResolvedValue({ apple_enabled: false, sms_enabled: false, whatsapp_enabled: false });
 });
 
 describe('AuthContext', () => {
