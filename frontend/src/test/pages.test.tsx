@@ -56,7 +56,7 @@ describe('Privacy', () => {
 describe('Receipts page', () => {
   it('renders the scanner, upload, manual entry and filter toolbar', async () => {
     const { listReceipts, listStores, listCategories } = await import('../api/endpoints');
-    vi.mocked(listReceipts).mockResolvedValue([]);
+    vi.mocked(listReceipts).mockResolvedValue({ results: [], count: 0 });
     vi.mocked(listStores).mockResolvedValue([]);
     vi.mocked(listCategories).mockResolvedValue([]);
 
@@ -114,6 +114,7 @@ describe('Points page', () => {
     expect(
       await screen.findByText(/Scan a Pick n Pay or Clicks slip/),
     ).toBeInTheDocument();
+    expect(screen.getByText('+ Add points')).toBeInTheDocument();
   });
 });
 

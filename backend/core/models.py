@@ -175,6 +175,34 @@ class Receipt(models.Model):
         return f'{self.store.store_name} — {self.purchase_date} (R{self.total_amount})'
 
 
+class BudgetAlert(models.Model):
+    """One sent notification per user/month/threshold, so the automated
+    budget warnings never repeat. Written by the cron endpoint and the
+    send_points_reminders-style command; purely a dedup ledger — nothing
+    renders from it in the UI."""
+
+    class Kind(models.TextChoices):
+        BUDGET_80 = 'budget_80', 'Spent 80% of budget'
+        BUDGET_100 = 'budget_100', 'Over budget'
+        POINTS_7DAY = 'points_7day', 'Points expire within 7 days'
+        POINTS_1DAY = 'points_1day', 'Points expire within 1 day'
+
+    alert_id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='budget_alerts', db_column='user_id')
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    period = models.CharField(max_length=7, blank=True, help_text='YYYY-MM for budget alerts; blank for points alerts.')
+    sent_at = models.DateTimeField(auto_now_add=True)
+    detail = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'kind', 'period'], name='uniq_alert_per_period')
+        ]
+
+    def __str__(self):
+        return f'{self.user} · {self.kind} · {self.period}'
+
+
 class LoyaltyPoints(models.Model):
     """LOYALTY_POINTS entity — spendable points earned on a receipt.
 

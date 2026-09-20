@@ -3,19 +3,21 @@ category match-or-create, analytics, and default-category seeding.
 
 Run with: python manage.py test core
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import jwt
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from unittest import mock
 
 from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
+from . import reminders as reminders_mod
 
 User = get_user_model()
 
@@ -774,3 +776,137 @@ def _png_file():
     Image.new('RGB', (1, 1), 'white').save(buffer, format='PNG')
     buffer.seek(0)
     return SimpleUploadedFile('slip.png', buffer.read(), content_type='image/png')
+
+
+class ChangePasswordTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='pw@x.com', password='old-password-123')
+        self.client = auth_client(self.user)
+
+    def test_change_with_correct_old_password(self):
+        response = self.client.post(
+            '/api/me/password/',
+            {'old_password': 'old-password-123', 'new_password': 'brand-new-pw-456'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('brand-new-pw-456'))
+
+    def test_rejects_wrong_old_password(self):
+        response = self.client.post(
+            '/api/me/password/',
+            {'old_password': 'wrong', 'new_password': 'brand-new-pw-456'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('old-password-123'))
+
+    def test_rejects_weak_new_password(self):
+        response = self.client.post(
+            '/api/me/password/',
+            {'old_password': 'old-password-123', 'new_password': '123'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_requires_login(self):
+        anon = APIClient()
+        response = anon.post(
+            '/api/me/password/',
+            {'old_password': 'x', 'new_password': 'yyyyyyyy'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class LoyaltyPointsCrudTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='pts@x.com', password='pass-12345678')
+        self.other = User.objects.create_user(email='pts2@x.com', password='pass-12345678')
+        self.store = Store.objects.create(store_name='Clicks', channel_type='Physical_Store')
+        self.block = LoyaltyPoints.objects.create(
+            user=self.user, store=self.store, points=500, label='ClubCard',
+        )
+
+    def test_manual_create_match_or_create_store(self):
+        response = auth_client(self.user).post(
+            '/api/points/',
+            {'store_name': 'Pick n Pay', 'label': 'Smart Shopper', 'points': 1200},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['store_name'], 'Pick n Pay')
+        self.assertTrue(Store.objects.filter(store_name='Pick n Pay').exists())
+
+    def test_update_and_delete_own_block(self):
+        client = auth_client(self.user)
+        response = client.patch(f'/api/points/{self.block.points_id}/', {'points': 750}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.block.refresh_from_db()
+        self.assertEqual(self.block.points, 750)
+
+        response = client.delete(f'/api/points/{self.block.points_id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(LoyaltyPoints.objects.filter(points_id=self.block.points_id).exists())
+
+    def test_other_user_cannot_touch_block(self):
+        client = auth_client(self.other)
+        self.assertEqual(
+            client.patch(f'/api/points/{self.block.points_id}/', {'points': 1}, format='json').status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(
+            client.delete(f'/api/points/{self.block.points_id}/').status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+
+class CronDailyEndpointTest(TestCase):
+    def setUp(self):
+        self.url = '/api/cron/daily/'
+        self.user = User.objects.create_user(email='cron@x.com', password='pass-12345678')
+
+    def test_requires_secret_and_key(self):
+        # No CRON_SECRET_KEY configured → 503.
+        with override_settings(CRON_SECRET_KEY=''):
+            self.assertEqual(
+                APIClient().post(self.url, format='json').status_code,
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        # Secret configured but wrong key → 403.
+        with override_settings(CRON_SECRET_KEY='s3cret'):
+            self.assertEqual(
+                APIClient().post(self.url, format='json', HTTP_X_CRON_KEY='nope').status_code,
+                status.HTTP_403_FORBIDDEN,
+            )
+
+    @mock.patch('core.reminders.send_budget_alerts', return_value=0)
+    @mock.patch('core.reminders.send_points_expiry_reminders', return_value=0)
+    def test_runs_with_correct_key(self, m_reminders, m_budget):
+        with override_settings(CRON_SECRET_KEY='s3cret'):
+            response = APIClient().post(self.url, format='json', HTTP_X_CRON_KEY='s3cret')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['points_reminders_7day'], 0)
+
+    def test_points_expiry_reminders_send_and_dedup(self):
+        from core.models import BudgetAlert
+
+        store = Store.objects.create(store_name='Pick n Pay', channel_type='Physical_Store')
+        expiry = timezone.now().date() + timedelta(days=7)
+        LoyaltyPoints.objects.create(user=self.user, store=store, points=300, expires_at=expiry)
+
+        with override_settings(
+            EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+            RESEND_API_KEY='',  # force the console/locmem path; Resend test-mode rejects other recipients
+        ):
+            from django.core import mail
+
+            sent = reminders_mod.send_points_expiry_reminders(7)
+            self.assertEqual(sent, 1)
+            self.assertEqual(len(mail.outbox), 1)
+            # Second run: deduped, no second email.
+            self.assertEqual(reminders_mod.send_points_expiry_reminders(7), 0)
+            self.assertEqual(len(mail.outbox), 1)
+            self.assertTrue(BudgetAlert.objects.filter(user=self.user, kind='points_7day').exists())

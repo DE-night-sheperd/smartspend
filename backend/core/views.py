@@ -27,6 +27,8 @@ from .reports import build_monthly_audit_pdf
 from .serializers import (
     AppleSignInSerializer,
     CategorySerializer,
+    ChangePasswordSerializer,
+    LoyaltyWriteSerializer,
     MonthlyAnalyticsSerializer,
     MonthBreakdownSerializer,
     OCRExtractResultSerializer,
@@ -826,7 +828,45 @@ class ReceiptViewSet(viewsets.ModelViewSet):
         return response
 
 
-class LoyaltyPointsViewSet(viewsets.ReadOnlyModelViewSet):
+class ChangePasswordView(generics.GenericAPIView):
+    """POST /api/me/password/ — change password with the current one."""
+
+    serializer_class = ChangePasswordSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({'detail': 'Password updated.'})
+
+
+class CronDailyView(generics.GenericAPIView):
+    """POST /api/cron/daily/ — the scheduler entrypoint for automated
+    notifications: points-expiry emails (7-day and 1-day warnings) and
+    budget alerts (80% used / over budget). Guarded by a shared secret so
+    only the scheduler can fire it; safe to call repeatedly (per-user,
+    per-period dedup in the BudgetAlert ledger)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        secret = getattr(settings, 'CRON_SECRET_KEY', '')
+        provided = (request.headers.get('X-Cron-Key') or '')
+        if not secret:
+            return Response(
+                {'detail': 'CRON_SECRET_KEY is not configured on the server.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if provided != secret:
+            return Response({'detail': 'Invalid cron key.'}, status=status.HTTP_403_FORBIDDEN)
+        from .reminders import run_daily
+
+        summary = run_daily()
+        return Response({'detail': 'Daily reminders processed.', **summary})
+
+
+class LoyaltyPointsViewSet(viewsets.ModelViewSet):
     """Spendable loyalty points per store (Smart Shopper, ClubCard, …).
 
     GET /api/points/            — all of the user's points, soonest expiry first
@@ -834,8 +874,8 @@ class LoyaltyPointsViewSet(viewsets.ReadOnlyModelViewSet):
     GET /api/points/?store=<id> — one store's points
     """
 
-    serializer_class = LoyaltyDraftSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = LoyaltyWriteSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwner]
 
     def get_queryset(self):
         # Default view = points the user can still use today. ?include_expired=1
@@ -871,6 +911,30 @@ class LoyaltyPointsViewSet(viewsets.ReadOnlyModelViewSet):
             for p in self.get_queryset()
         ]
         return Response({'count': len(rows), 'results': rows})
+
+    def perform_create(self, serializer):
+        # POST /points/ mirrors the list response so the client can prepend
+        # the new row without a refetch round-trip.
+        instance = serializer.save()
+        self._created = instance
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        p = self._created
+        return Response(
+            {
+                'points_id': p.points_id,
+                'store_id': p.store_id,
+                'store_name': p.store.store_name,
+                'label': p.label,
+                'points': p.points,
+                'expires_at': p.expires_at,
+                'created_at': p.created_at,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ReceiptItemViewSet(viewsets.ModelViewSet):

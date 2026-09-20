@@ -36,6 +36,33 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    """Input for POST /api/me/password/ — old password required so a stolen
+    tab can't lock the user out; Django's validators apply to the new one."""
+
+    old_password = serializers.CharField()
+    new_password = serializers.CharField(min_length=8)
+
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError('Your current password is not correct.')
+        return value
+
+    def validate_new_password(self, value):
+        from django.contrib.auth.password_validation import validate_password
+
+        user = self.context['request'].user
+        validate_password(value, user=user)  # raises ValidationError with friendly messages
+        return value
+
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        user.set_password(self.validated_data['new_password'])
+        user.save(update_fields=['password'])
+        return user
+
+
 class RequestLoginCodeSerializer(serializers.Serializer):
     """Input for POST /api/auth/login-code/."""
 
@@ -284,6 +311,38 @@ class LoyaltyDraftSerializer(serializers.Serializer):
     points = serializers.IntegerField(min_value=1)
     label = serializers.CharField(required=False, allow_blank=True, default='Points')
     expires_at = serializers.DateField(required=False, allow_null=True)
+
+
+class LoyaltyWriteSerializer(serializers.ModelSerializer):
+    """Manual add/edit of a points block (e.g. the balance printed on last
+    month's slip). Store is matched-or-created by name, same as receipts."""
+
+    store_name = serializers.CharField(source='store.store_name', max_length=255)
+
+    class Meta:
+        model = LoyaltyPoints
+        fields = ['points_id', 'store_name', 'label', 'points', 'expires_at', 'created_at']
+        read_only_fields = ['points_id', 'created_at']
+
+    def create(self, validated_data):
+        store_name = validated_data.pop('store')['store_name'].strip()
+        store, _ = Store.objects.get_or_create(store_name=store_name, defaults={'channel_type': 'Physical_Store'})
+        return LoyaltyPoints.objects.create(
+            user=self.context['request'].user,
+            store=store,
+            **validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        store_data = validated_data.pop('store', None)
+        if store_data:
+            store_name = store_data['store_name'].strip()
+            store, _ = Store.objects.get_or_create(store_name=store_name, defaults={'channel_type': 'Physical_Store'})
+            instance.store = store
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
 
 
 class OCRExtractResultSerializer(serializers.Serializer):
