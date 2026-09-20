@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Receipt } from '../types';
 
 /**
@@ -33,7 +33,9 @@ function dots(name: string, price: string): { name: string; dots: string; price:
 
 export default function TillSlip({ receipt, expanded = false }: { receipt: Receipt; expanded?: boolean }) {
   const bars = useMemo(() => barcodeBars(receipt.receipt_id), [receipt.receipt_id]);
+  const [showOriginal, setShowOriginal] = useState(false);
   const slipNo = receipt.slip_number || `SS-${String(receipt.receipt_id).padStart(6, '0')}`;
+  const originalLines = (receipt.original_text ?? '').split('\n').filter((ln) => ln.trim().length > 0);
 
   const lines = receipt.items.map((it) => ({
     key: it.item_id,
@@ -77,27 +79,62 @@ export default function TillSlip({ receipt, expanded = false }: { receipt: Recei
           )}
         </div>
 
-        <div className="till-divider" aria-hidden="true">
-          ···· ITEMS ····
-        </div>
+        {(originalLines.length > 0 || receipt.items.length > 0) && (
+          <div className="till-view-toggle no-print" role="tablist" aria-label="Slip view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!showOriginal}
+              className={!showOriginal ? 'active' : ''}
+              onClick={() => setShowOriginal(false)}
+            >
+              Clean
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={showOriginal}
+              className={showOriginal ? 'active' : ''}
+              onClick={() => setShowOriginal(true)}
+              disabled={originalLines.length === 0}
+              title={originalLines.length === 0 ? 'No original transcription captured' : 'The slip exactly as printed'}
+            >
+              Original
+            </button>
+          </div>
+        )}
 
-        <ul className="till-items">
-          {lines.map((l) => (
-            <li key={l.key} className="till-item" title={l.isImpulse ? 'Flagged impulse buy' : l.category}>
-              <span className="till-item-name">
-                {l.isImpulse && <em className="till-impulse">*</em>}
-                {l.name}
-              </span>
-              <span className="till-item-dots">{l.dots}</span>
-              <span className="till-item-price">{l.price}</span>
-            </li>
-          ))}
-        </ul>
+        {showOriginal ? (
+          <div className="till-original">
+            {originalLines.map((ln, i) => (
+              <div key={i} className="till-original-line">{ln}</div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="till-divider" aria-hidden="true">
+              ···· ITEMS ····
+            </div>
 
-        <div className="till-total-row">
-          <span>TOTAL</span>
-          <span className="till-total-num">R{Number(receipt.total_amount).toFixed(2)}</span>
-        </div>
+            <ul className="till-items">
+              {lines.map((l) => (
+                <li key={l.key} className="till-item" title={l.isImpulse ? 'Flagged impulse buy' : l.category}>
+                  <span className="till-item-name">
+                    {l.isImpulse && <em className="till-impulse">*</em>}
+                    {l.name}
+                  </span>
+                  <span className="till-item-dots">{l.dots}</span>
+                  <span className="till-item-price">{l.price}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="till-total-row">
+              <span>TOTAL</span>
+              <span className="till-total-num">R{Number(receipt.total_amount).toFixed(2)}</span>
+            </div>
+          </>
+        )}
 
         <div className="till-barcode" aria-hidden="true">
           {bars.map((b, i) => (

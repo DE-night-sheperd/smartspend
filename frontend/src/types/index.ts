@@ -55,6 +55,8 @@ export interface Receipt {
   branch_name?: string;
   slip_number?: string;
   payment_method?: string;
+  /** Verbatim line-by-line transcription of the slip as printed */
+  original_text?: string;
   items: ReceiptItem[];
 }
 
@@ -115,6 +117,7 @@ export interface OcrDraft {
   branch?: string | null;
   slip_number?: string | null;
   payment_method?: string | null;
+  original_lines?: string[];
   items: { name: string; price: number; category?: string | null; is_impulse?: boolean }[];
   loyalty_points?: LoyaltyDraft[];
   raw_text: string;

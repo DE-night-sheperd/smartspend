@@ -746,6 +746,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'branch': parsed.branch,
             'slip_number': parsed.slip_number,
             'payment_method': parsed.payment_method,
+            'original_lines': parsed.original_lines,
             'items': [
                 {'name': i.name, 'price': i.price, 'category': i.category, 'is_impulse': i.is_impulse}
                 for i in parsed.items
@@ -794,6 +795,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'branch': parsed.branch,
             'slip_number': parsed.slip_number,
             'payment_method': parsed.payment_method,
+            'original_lines': parsed.original_lines,
             'items': [
                 {'name': i.name, 'price': i.price, 'category': i.category, 'is_impulse': i.is_impulse}
                 for i in parsed.items

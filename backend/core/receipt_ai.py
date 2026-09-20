@@ -51,6 +51,9 @@ with exactly this shape:
   "branch": "store branch as printed (name/number), or null",
   "slip_number": "transaction/invoice/slip number, or null",
   "payment_method": "payment line as printed (e.g. Visa ****1234, Cash), or null",
+  "original_lines": [
+    "EVERY printed line of the slip transcribed verbatim, in order, top to bottom —"
+  ],
   "items": [
     {{
       "name": "line item name",
@@ -94,6 +97,14 @@ programme name, and the expiry date printed on the slip. Do NOT put \
 points into items — they are not money spent. If the slip shows no \
 points, return an empty loyalty_points array.
 
+original_lines: transcribe the WHOLE slip exactly as printed — every line,
+top to bottom, in order: store header, contact details, date/time, cashier,
+item lines with their own spacing/prices, discounts, subtotals, VAT, totals,
+loyalty lines, payment lines, approvals, footers and slogans. Keep the
+original wording, numbers and casing; use empty strings for blank lines.
+This is the user's proof-of-purchase for returns — completeness matters
+more than tidiness. Never summarise or clean it up.
+
 Rules:
 - Use the line total for each item (quantity x unit price), not the unit price.
 - Drop non-purchase lines (subtotals, VAT, loyalty, cashier, payment info).
@@ -118,6 +129,7 @@ for app trips, e-mail receipts and online orders)",
   "branch": "store branch if shown, else null",
   "slip_number": "transaction/invoice/order number, or null",
   "payment_method": "payment method line (e.g. Visa ****1234, Cash), or null",
+  "original_lines": ["every line of the pasted receipt verbatim, in order"],
   "items": [
     {{
       "name": "line item or charge name",
@@ -137,6 +149,9 @@ fee, service fee, tolls, tip, delivery fee, VAT, subscription plan, etc.
 - Drop non-purchase lines (totals, balances, payment metadata).
 - Loyalty points (Smart Shopper, ClubCard, eBucks, …) go in the \
 loyalty_points array with their printed expiry date — never into items.\
+- original_lines: copy the pasted receipt text through verbatim as lines,
+keeping the original wording, numbers, casing and order — it is the user's
+proof-of-purchase for returns. Never summarise or clean it up.
 - If a field is not present, use null (or an empty items array).\
 """
 
@@ -169,6 +184,7 @@ class ParsedReceipt:
     branch: str | None = None
     slip_number: str | None = None
     payment_method: str | None = None
+    original_lines: list[str] = field(default_factory=list)
     items: list[ParsedItem] = field(default_factory=list)
     loyalty: list[ParsedLoyalty] = field(default_factory=list)
     confidence: float = 0.0
@@ -287,6 +303,7 @@ def verify_gemini_key(api_key: str) -> tuple[bool, str]:
 
 def _parsed_from_gemini(raw: dict, user_key_hint: str | None = None) -> ParsedReceipt:
     """Map a successful Gemini reply onto a ParsedReceipt."""
+    original_lines = [str(ln) for ln in (raw.get('original_lines') or []) if ln is not None]
     items = [
         ParsedItem(
             name=str(i.get('name', 'Item'))[:255],
@@ -309,6 +326,7 @@ def _parsed_from_gemini(raw: dict, user_key_hint: str | None = None) -> ParsedRe
         branch=raw.get('branch'),
         slip_number=raw.get('slip_number'),
         payment_method=raw.get('payment_method'),
+        original_lines=original_lines,
         items=items,
         loyalty=_loyalty_from_raw(raw),
         confidence=float(raw.get('confidence') or 0.8),
@@ -378,6 +396,7 @@ def analyze_receipt(file, category_names: list[str] | None = None, user_key: str
         branch=identity.get('branch'),
         slip_number=identity.get('slip_number'),
         payment_method=identity.get('payment_method'),
+        original_lines=[ln.strip() for ln in legacy.raw_text.splitlines() if ln.strip()],
         items=[ParsedItem(name=i.name, price=i.price) for i in legacy.items],
         loyalty=_fallback_loyalty_parse(legacy.raw_text),
         confidence=0.45,
@@ -637,6 +656,7 @@ def analyze_receipt_text(text: str, category_names: list[str] | None = None, use
                 branch=raw.get('branch'),
                 slip_number=raw.get('slip_number'),
                 payment_method=raw.get('payment_method'),
+                original_lines=[str(ln) for ln in (raw.get('original_lines') or []) if ln is not None],
                 items=items,
                 loyalty=_loyalty_from_raw(raw),
                 confidence=float(raw.get('confidence') or 0.8),
@@ -657,6 +677,7 @@ def analyze_receipt_text(text: str, category_names: list[str] | None = None, use
         purchase_date=raw['date'],
         total_amount=raw['total'],
         channel_type=raw['channel'],
+        original_lines=[ln.rstrip() for ln in text.splitlines() if ln.strip()],
         items=items,
         loyalty=_fallback_loyalty_parse(text),
         confidence=raw['confidence'],
