@@ -5,6 +5,7 @@ import {
   createReceipt,
   deleteReceipt,
   exportReceiptsCsv,
+  extractReceiptText,
   listCategories,
   listReceipts,
   listStores,
@@ -58,6 +59,9 @@ export default function Receipts() {
   const [pendingImage, setPendingImage] = useState<File | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasting, setPasting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -117,6 +121,27 @@ export default function Receipts() {
       setShowForm(true);
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function handlePasteExtract() {
+    if (!pasteText.trim() || pasting) return;
+    setPasting(true);
+    setScanError(null);
+    try {
+      const result = await extractReceiptText(pasteText);
+      setOcrDraft(result);
+      setPendingImage(null);
+      setEditing(null);
+      setShowForm(true);
+      setPasteOpen(false);
+      setPasteText('');
+      setToast('Draft ready — check the details, then save');
+    } catch {
+      setScanError('Could not read that receipt text. You can still add the receipt manually below.');
+      setShowForm(true);
+    } finally {
+      setPasting(false);
     }
   }
 
@@ -188,11 +213,41 @@ export default function Receipts() {
               }}
             />
           </label>
+          <button
+            type="button"
+            className="button-secondary scan-dropzone"
+            onClick={() => setPasteOpen((v) => !v)}
+            disabled={scanning}
+          >
+            📋 Paste e-receipt
+          </button>
           <button onClick={openCreate}>{showForm && !editing ? 'Cancel' : '+ Add manually'}</button>
         </div>
       </div>
 
       {scanError && <p className="form-error">{scanError}</p>}
+
+      {pasteOpen && (
+        <div className="paste-panel">
+          <label>
+            Paste the receipt text (Uber or Bolt trip fare, order summary, invoice copy…)
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={7}
+              placeholder={'Uber\nTrip Receipt\n14 Sep 2026\nTrip fare R87.50\nTotal R99.50'}
+            />
+          </label>
+          <div className="paste-actions">
+            <button type="button" onClick={handlePasteExtract} disabled={pasting || !pasteText.trim()}>
+              {pasting ? 'Reading receipt…' : 'Read the receipt'}
+            </button>
+            <button type="button" className="button-secondary" onClick={() => setPasteOpen(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="receipt-toolbar">
         <input
@@ -462,6 +517,12 @@ function ReceiptForm({
           category: it.category.trim() || 'Other',
           is_impulse: it.is_impulse,
         })),
+        // Points read off the slip ride along to become trackable balances.
+        loyalty_points: (editing ? [] : (ocrDraft?.loyalty_points ?? [])).map((l) => ({
+          points: l.points,
+          label: l.label ?? 'Points',
+          expires_at: l.expires_at ?? null,
+        })),
       };
 
       const receipt = editing
@@ -497,6 +558,17 @@ function ReceiptForm({
           Auto-filled{ocrDraft.engine === 'gemini' ? ' by AI' : ''} from your photo — check the store, date, prices and
           categories below before saving.
         </p>
+      )}
+      {!editing && (ocrDraft?.loyalty_points?.length ?? 0) > 0 && (
+        <div className="loyalty-draft">
+          <span className="loyalty-draft-title">Points found on this slip:</span>
+          {ocrDraft!.loyalty_points!.map((l, i) => (
+            <span key={i} className="loyalty-chip">
+              ⭐ {l.label || 'Points'}: {l.points.toLocaleString()}
+              {l.expires_at ? ` · expires ${l.expires_at}` : ' · no expiry printed'}
+            </span>
+          ))}
+        </div>
       )}
 
       <div className="form-row">

@@ -1,6 +1,7 @@
 import { api, API_BASE_URL, tokenStore } from './client';
 import type {
   Category,
+  LoyaltyPointsRow,
   MonthBreakdown,
   MonthlyAnalytics,
   OcrDraft,
@@ -45,6 +46,53 @@ export async function verifySmsCode(
 ): Promise<{ access: string; refresh: string; created_account: boolean }> {
   const { data } = await api.post('/auth/verify-login-code/sms/', { phone, code });
   tokenStore.setTokens(data.access, data.refresh);
+  return data;
+}
+
+/** WhatsApp-code login: same code model as SMS, different channel. */
+export async function requestWhatsappCode(phone: string): Promise<{ detail: string; transport: string; dev_code?: string }> {
+  const { data } = await api.post('/auth/login-code/whatsapp/', { phone });
+  return data;
+}
+
+export async function verifyWhatsappCode(
+  phone: string,
+  code: string,
+): Promise<{ access: string; refresh: string; created_account: boolean }> {
+  const { data } = await api.post('/auth/verify-login-code/whatsapp/', { phone, code });
+  tokenStore.setTokens(data.access, data.refresh);
+  return data;
+}
+
+/** Public capability flags so the login page renders honest buttons. */
+export async function getAuthConfig(): Promise<{ apple_enabled: boolean }> {
+  const { data } = await api.get('/auth/config/');
+  return data;
+}
+
+/** Sign in with Apple: exchange the identity token from the Apple JS flow
+ * for SmartSpend JWTs. `name` only arrives on first consent. */
+export async function appleSignIn(identityToken: string, name?: string) {
+  const { data } = await api.post('/auth/apple/', {
+    identity_token: identityToken,
+    ...(name ? { name } : {}),
+  });
+  tokenStore.setTokens(data.access, data.refresh);
+  return data as { created_account: boolean };
+}
+
+/** Spendable loyalty points (Smart Shopper, ClubCard, …), soonest expiry first. */
+export async function listPoints(includeExpired = false): Promise<LoyaltyPointsRow[]> {
+  const { data } = await api.get<Paginated<LoyaltyPointsRow>>('/points/', {
+    params: includeExpired ? { include_expired: '1' } : {},
+  });
+  return data.results;
+}
+
+/** Digital receipts: paste the text of an e-receipt (Uber, Bolt, order
+ * summaries) and get the same structured draft as a photo scan. */
+export async function extractReceiptText(text: string): Promise<OcrDraft> {
+  const { data } = await api.post<OcrDraft>('/receipts/extract_text/', { text });
   return data;
 }
 
@@ -130,6 +178,8 @@ export interface ReceiptDraft {
     category: number | string;
     is_impulse: boolean;
   }[];
+  /** Spendable points blocks read off the slip (Smart Shopper, ClubCard…). */
+  loyalty_points?: { points: number; label?: string; expires_at?: string | null }[];
 }
 
 export async function createReceipt(payload: ReceiptDraft) {

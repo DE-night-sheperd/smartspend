@@ -9,6 +9,7 @@ import LoginPassword from './pages/LoginPassword';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Receipts from './pages/Receipts';
+import Points from './pages/Points';
 import Settings from './pages/Settings';
 import Privacy from './pages/Privacy';
 import './App.css';
@@ -39,6 +40,14 @@ function AnimatedRoutes() {
           element={
             <ProtectedRoute>
               <PageFade><Receipts /></PageFade>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/points"
+          element={
+            <ProtectedRoute>
+              <PageFade><Points /></PageFade>
             </ProtectedRoute>
           }
         />

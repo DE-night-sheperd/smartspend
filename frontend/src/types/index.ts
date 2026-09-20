@@ -95,16 +95,33 @@ export interface MonthBreakdown {
   } | null;
 }
 
+export interface LoyaltyDraft {
+  points: number;
+  label?: string;
+  expires_at?: string | null;
+}
+
 export interface OcrDraft {
   merchant_name: string | null;
   purchase_date: string | null;
   total_amount: number | null;
   channel_type?: ChannelType | null;
   items: { name: string; price: number; category?: string | null; is_impulse?: boolean }[];
+  loyalty_points?: LoyaltyDraft[];
   raw_text: string;
   confidence: number;
   engine: 'gemini' | 'tesseract';
   notes?: string[];
+}
+
+export interface LoyaltyPointsRow {
+  points_id: number;
+  store_id: number;
+  store_name: string;
+  label: string;
+  points: number;
+  expires_at: string | null;
+  created_at: string;
 }
 
 export interface Paginated<T> {

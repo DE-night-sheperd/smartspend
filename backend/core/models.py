@@ -140,6 +140,35 @@ class Receipt(models.Model):
         return f'{self.store.store_name} — {self.purchase_date} (R{self.total_amount})'
 
 
+class LoyaltyPoints(models.Model):
+    """LOYALTY_POINTS entity — spendable points earned on a receipt.
+
+    Pick n Pay Smart Shopper and Clicks ClubCard both print points balances
+    and vouchers on till slips with expiry dates. Every extraction from a
+    scanned/pasted receipt lands here so the user can see, per store, how
+    many points are waiting and when they lapse.
+    """
+
+    points_id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='loyalty_points', db_column='user_id')
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name='loyalty_points', db_column='store_id')
+    receipt = models.ForeignKey(
+        Receipt, on_delete=models.SET_NULL, blank=True, null=True,
+        related_name='loyalty_points', db_column='receipt_id',
+    )
+    points = models.PositiveIntegerField(help_text='Points available to spend.')
+    label = models.CharField(max_length=255, blank=True, help_text='E.g. "Smart Shopper points" or the voucher title.')
+    expires_at = models.DateField(blank=True, null=True, help_text='Date the points lapse, printed on the slip.')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['expires_at', '-created_at']  # soonest expiry first
+        indexes = [models.Index(fields=['user', 'expires_at'])]
+
+    def __str__(self):
+        return f'{self.store.store_name} · {self.points} pts · exp {self.expires_at}'
+
+
 class ReceiptItem(models.Model):
     """RECEIPT_ITEMS entity. Line items belonging to a receipt."""
 

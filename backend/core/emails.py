@@ -65,3 +65,58 @@ def send_login_code_email(to_email: str, code: str) -> str:
     from django.core.mail import send_mail
     send_mail(subject, text, settings.RESEND_FROM, [to_email], html_message=html, fail_silently=False)
     return 'console'
+
+
+def send_loyalty_expiry_email(to_email: str, rows: list[dict]) -> str:
+    """Warn a user that loyalty points are about to expire.
+
+    rows: [{store_name, label, points, expires_at, days_left}]. Returns
+    'resend' or 'console' like the login-code sender.
+    """
+    lines = [
+        f"- {row['points']} {row['label']} at {row['store_name']}"
+        f" — expires {row['expires_at']} ({row['days_left']} day{'s' if row['days_left'] != 1 else ''} left)"
+        for row in rows
+    ]
+    subject = 'Your SmartSpend points are about to expire'
+    text = (
+        'Spend these before they lapse:\n\n' + '\n'.join(lines) +
+        '\n\nOpen SmartSpend > Points to see everything you can still use.'
+    )
+    html_rows = ''.join(
+        f"<li>{row['points']} <b>{row['label']}</b> at {row['store_name']} — "
+        f"expires {row['expires_at']} ({row['days_left']} day{'s' if row['days_left'] != 1 else ''} left)</li>"
+        for row in rows
+    )
+    html = f"""\
+<div style="font-family:ui-monospace,Consolas,monospace;max-width:480px;margin:0 auto;padding:24px 0;">
+  <h2 style="letter-spacing:-0.5px;">SmartSpend</h2>
+  <p>Spend these points before they lapse:</p>
+  <ul>{html_rows}</ul>
+  <p style="color:#5c6a5f;">Open SmartSpend &rarr; Points to see everything you can still use.</p>
+</div>"""
+
+    api_key = getattr(settings, 'RESEND_API_KEY', '')
+    if api_key:
+        resp = requests.post(
+            RESEND_ENDPOINT,
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'from': settings.RESEND_FROM,
+                'to': [to_email],
+                'subject': subject,
+                'text': text,
+                'html': html,
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f'Resend rejected the email: HTTP {resp.status_code} {resp.text[:200]}')
+        return 'resend'
+
+    from django.core.mail import send_mail
+    send_mail(subject, text, settings.RESEND_FROM, [to_email], html_message=html, fail_silently=False)
+    return 'console'

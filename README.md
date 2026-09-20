@@ -18,19 +18,40 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   first login. Codes are delivered through [Resend](https://resend.com) when
   `RESEND_API_KEY` is set, or printed to the runserver console in dev
   (the response also carries `dev_code` so the UI can show it).
-- **Passwordless SMS-code login** (`/api/auth/login-code/sms/` +
-  `/api/auth/verify-login-code/sms/`): the phone-number twin of the email
-  flow — same code model, same rate limit, same single-use rules. Local
-  numbers are normalized to E.164 ("082 123 4567" → +27…), and the phone
-  IS the identity on first login (the account's email is set to the
-  normalized number; both fields are editable from Settings, and changing
-  either re-issues a verification code to the new destination). Codes are
-  delivered through [Telnyx](https://telnyx.com) when `TELNYX_API_KEY` and
-  `TELNYX_FROM` are set; without them the endpoint returns `dev_code` so
-  the flow stays testable in dev.
-- **Backend test suite** (`python manage.py test core`): 23 tests covering
-  email- and SMS-code auth, receipt CRUD + per-user isolation, category
-  match-or-create, analytics math, and default-category seeding
+- **Passwordless SMS- and WhatsApp-code login** (`/api/auth/login-code/sms/`,
+  `/api/auth/login-code/whatsapp/` + their `verify-` twins): the
+  phone-number twin of the email flow — same code model, same rate limit,
+  same single-use rules. Local numbers are normalized to E.164 ("082 123
+  4567" → +27…), and the phone IS the identity on first login (the
+  account's email is set to the normalized number; both fields are
+  editable from Settings, and changing either re-issues a verification
+  code to the new destination). Codes are delivered through
+  [Telnyx](https://telnyx.com) (`TELNYX_API_KEY` + `TELNYX_FROM`, with
+  `TELNYX_WHATSAPP_FROM` for the WhatsApp channel); without them the
+  endpoints return `dev_code` so the flow stays testable in dev.
+- **Sign in with Apple** (`/api/auth/apple/`): the login page loads
+  Apple's JS flow and posts the identity token to the backend, which
+  verifies the RS256 signature against Apple's published JWKS plus
+  issuer/audience/expiry before trusting the email claim. Gated on
+  `APPLE_CLIENT_ID` — unset, the button is hidden and the endpoint
+  answers 503 rather than trusting unverified tokens.
+- **Loyalty points tracking** (Pick n Pay Smart Shopper, Clicks ClubCard,
+  eBucks, Dis-Chem): receipt extraction also reads spendable-points
+  blocks and their printed expiry dates off the slip. Saving the receipt
+  stores them as per-store `LoyaltyPoints` rows; the **Points page**
+  (`/points`) groups what you can still spend by store, soonest expiry
+  first, and flags anything lapsing within 7 days. The dashboard shows
+  the same warning, and `python manage.py send_points_reminders` emails
+  users whose points expire in exactly 7 days or 1 day (cron-friendly).
+- **Digital receipts by paste** (`POST /api/receipts/extract_text/`):
+  e-receipts that never touch paper — Uber and Bolt trip fares, online
+  order summaries, invoice copies — are pasted as text and parsed into
+  the same structured draft as a photo scan.
+- **Backend test suite** (`python manage.py test core`): 45 tests covering
+  email-, SMS-, WhatsApp- and Apple-code auth, receipt CRUD + per-user
+  isolation, category match-or-create, loyalty-points extraction and
+  expiry reminders, digital-receipt parsing, analytics math, and
+  default-category seeding
 - Full CRUD on stores/categories/receipts/receipt-items via DRF ViewSets
   (receipts support full edit — replace line items, store, date, total — and
   delete)
@@ -66,9 +87,10 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
 - `GET /api/receipts/month_breakdown/?year=&month=` — deep-dive analytics for
   one month: daily totals, per-category and per-store totals, channel split,
   essential vs impulse spend, and the biggest single purchase.
-- **Budget settings**: the user's `monthly_budget_limit` is editable on the
-  Settings page (`PATCH /api/me/`) and drives the dashboard thermometer,
-  variance stats, and the audit PDF.
+- **Budget settings**: the user's `monthly_budget_limit` is editable only
+  from the Settings page (`PATCH /api/me/`) — registration never asks for
+  it — and drives the dashboard thermometer, variance stats, and the
+  audit PDF.
 - SQLite for local dev by default; set `POSTGRES_HOST` etc. in `.env` to
   point at Supabase Postgres instead — no code changes needed
 
@@ -153,7 +175,8 @@ bound to `0.0.0.0`).
 | --- | --- |
 | `GEMINI_API_KEY` | Real AI receipt analysis — Gemini vision extracts merchant, date, total, line items, categories and impulse flags straight from the photo. Without it, scans degrade to Tesseract OCR + regex heuristics. |
 | `RESEND_API_KEY` | Login codes are emailed for real. Without it, codes print to the Django runserver console and the API returns `dev_code` so the UI can display it. |
-| `TELNYX_API_KEY` + `TELNYX_FROM` | SMS login codes are texted for real through Telnyx. Without them, the SMS endpoint returns `dev_code` so the flow stays testable. |
+| `TELNYX_API_KEY` + `TELNYX_FROM` | SMS login codes are texted for real through Telnyx. Add `TELNYX_WHATSAPP_FROM` (a WhatsApp-enabled sender) to deliver the codes as WhatsApp messages instead. Without keys, the SMS/WhatsApp endpoints return `dev_code` so the flow stays testable. |
+| `APPLE_CLIENT_ID` | Shows the "Continue with Apple" button and lets `/api/auth/apple/` verify Apple identity tokens. Unset, Apple sign-in stays hidden. |
 
 All features work without keys (dev fallbacks), so the app is fully usable
 out of the box.

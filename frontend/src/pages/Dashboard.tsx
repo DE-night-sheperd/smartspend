@@ -18,8 +18,9 @@ import {
   downloadMonthlyAuditPdf,
   getMonthBreakdown,
   getMonthlyAnalytics,
+  listPoints,
 } from '../api/endpoints';
-import type { MonthBreakdown, MonthlyAnalytics } from '../types';
+import type { LoyaltyPointsRow, MonthBreakdown, MonthlyAnalytics } from '../types';
 import { useAuth } from '../context/AuthContext';
 import AnimatedNumber from '../components/AnimatedNumber';
 import { celebrate } from '../lib/celebrate';
@@ -34,6 +35,12 @@ const DONUT_COLORS = ['#1fae63', '#e8a200', '#e8483a', '#3546e0', '#7a5cff', '#0
 const fmtRand = (v: number | string) =>
   Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+function daysUntil(iso: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((new Date(iso).getTime() - today.getTime()) / 86_400_000);
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [rows, setRows] = useState<MonthlyAnalytics[]>([]);
@@ -44,10 +51,15 @@ export default function Dashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [points, setPoints] = useState<LoyaltyPointsRow[]>([]);
   const celebrated = useRef(false);
 
   useEffect(() => {
     getMonthlyAnalytics().then(setRows).catch(() => setRows([]));
+  }, []);
+
+  useEffect(() => {
+    listPoints().then(setPoints).catch(() => setPoints([]));
   }, []);
 
   const loadBreakdown = useCallback((year: number, month: number) => {
@@ -111,6 +123,15 @@ export default function Dashboard() {
 
   const hasReceipts = rows.length > 0;
 
+  // Loyalty points about to lapse — the same 7-day warning the reminder
+  // email uses, shown where the user actually starts their session.
+  const expiringPoints = points.filter((p) => {
+    if (!p.expires_at) return false;
+    const days = daysUntil(p.expires_at);
+    return days >= 0 && days <= 7;
+  });
+  const expiringTotal = expiringPoints.reduce((sum, p) => sum + p.points, 0);
+
   return (
     <div className="page">
       <div className="page-header">
@@ -126,6 +147,17 @@ export default function Dashboard() {
           </button>
         )}
       </div>
+
+      {expiringPoints.length > 0 && (
+        <motion.div
+          className="points-alert"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          ⏰ {expiringTotal.toLocaleString()} points expire within 7 days ({expiringPoints.map((p) => `${p.store_name}: ${p.points.toLocaleString()}`).join(', ')}).{' '}
+          <Link to="/points">Spend them before they lapse</Link>
+        </motion.div>
+      )}
 
       {/* Month switcher */}
       <div className="month-nav">

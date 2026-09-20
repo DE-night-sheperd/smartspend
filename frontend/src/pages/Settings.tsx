@@ -64,22 +64,6 @@ export default function Settings() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <h2>Budget</h2>
-        <label>
-          Monthly budget limit (R)
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={form.monthly_budget_limit}
-            onChange={(e) => update('monthly_budget_limit', e.target.value)}
-            required
-          />
-        </label>
-        <p className="field-hint">
-          Every dashboard stat, the thermometer, and the variance report are measured against this number.
-        </p>
-
         <h2>Profile</h2>
         <div className="form-row">
           <label>
@@ -108,6 +92,22 @@ export default function Settings() {
           {user?.email
             ? 'Changing your email or phone re-sends a verification code to the new destination.'
             : ''}
+        </p>
+
+        <h2>Budget</h2>
+        <label>
+          Monthly budget limit (R)
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={form.monthly_budget_limit}
+            onChange={(e) => update('monthly_budget_limit', e.target.value)}
+            required
+          />
+        </label>
+        <p className="field-hint">
+          Every dashboard stat, the thermometer, and the variance report are measured against this number.
         </p>
 
         {error && <p className="form-error">{error}</p>}
