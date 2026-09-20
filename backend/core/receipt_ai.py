@@ -179,8 +179,9 @@ def _read_bytes(file) -> bytes:
 def _gemini_extract(data: bytes, mime_type: str, category_names: list[str], api_key: str | None = None) -> dict:
     """Call Gemini with the raw photo and parse its JSON reply.
 
-    One automatic retry (2s backoff) absorbs transient 429/5xx responses —
-    e.g. the free tier's per-minute rate limit when scans come in bursts."""
+    Automatic retries with growing backoff absorb transient 429/5xx
+    responses — the free tier's per-minute rate limit and Google's
+    occasional "high demand" 503 spikes — before degrading to OCR."""
     api_key = api_key or getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
         raise RuntimeError('GEMINI_API_KEY not configured')
@@ -203,7 +204,8 @@ def _gemini_extract(data: bytes, mime_type: str, category_names: list[str], api_
     }
 
     resp = None
-    for attempt in range(2):
+    retry_delays = (2, 5, 10)
+    for attempt in range(len(retry_delays) + 1):
         try:
             resp = requests.post(
                 GEMINI_ENDPOINT.format(model=model),
@@ -213,13 +215,13 @@ def _gemini_extract(data: bytes, mime_type: str, category_names: list[str], api_
                 timeout=45,
             )
         except requests.RequestException:
-            if attempt == 0:
-                time.sleep(2)
+            if attempt < len(retry_delays):
+                time.sleep(retry_delays[attempt])
                 continue
             raise
         if resp.status_code in (429,) or resp.status_code >= 500:
-            if attempt == 0:
-                time.sleep(2)
+            if attempt < len(retry_delays):
+                time.sleep(retry_delays[attempt])
                 continue
         break
 
