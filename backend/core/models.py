@@ -154,6 +154,12 @@ class Receipt(models.Model):
     source_type = models.CharField(max_length=20, choices=SourceType.choices, default=SourceType.UPLOAD)
     image_url = models.TextField(blank=True, null=True)
     receipt_image = models.ImageField(upload_to='receipts/%Y/%m/', blank=True, null=True)
+    # Slip identity — captured from the slip so the in-app digital copy can
+    # serve as a return slip at the store (cashier, branch, slip number…).
+    cashier_name = models.CharField(max_length=120, blank=True, help_text='Cashier/teller name printed on the slip.')
+    branch_name = models.CharField(max_length=160, blank=True, help_text='Store branch as printed, e.g. "Sandton City 1049".')
+    slip_number = models.CharField(max_length=80, blank=True, help_text='Transaction/invoice/slip number printed on the slip.')
+    payment_method = models.CharField(max_length=60, blank=True, help_text='Payment line as printed, e.g. "Visa ••1234" or "Cash".')
     verified = models.BooleanField(default=False, help_text='Set true once user confirms OCR-parsed data.')
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -50,6 +50,11 @@ export interface Receipt {
   receipt_image?: string | null;
   verified: boolean;
   created_at: string;
+  /** Slip identity — cashier, branch, slip number, payment (return-slip use) */
+  cashier_name?: string;
+  branch_name?: string;
+  slip_number?: string;
+  payment_method?: string;
   items: ReceiptItem[];
 }
 
@@ -106,6 +111,10 @@ export interface OcrDraft {
   purchase_date: string | null;
   total_amount: number | null;
   channel_type?: ChannelType | null;
+  cashier?: string | null;
+  branch?: string | null;
+  slip_number?: string | null;
+  payment_method?: string | null;
   items: { name: string; price: number; category?: string | null; is_impulse?: boolean }[];
   loyalty_points?: LoyaltyDraft[];
   raw_text: string;

@@ -47,6 +47,10 @@ with exactly this shape:
   "date": "purchase date as YYYY-MM-DD, or null",
   "total": "final amount paid as a number, or null",
   "channel": "Physical_Store or Online_Ecommerce, best guess",
+  "cashier": "cashier/teller name printed on the slip, or null",
+  "branch": "store branch as printed (name/number), or null",
+  "slip_number": "transaction/invoice/slip number, or null",
+  "payment_method": "payment line as printed (e.g. Visa ****1234, Cash), or null",
   "items": [
     {{
       "name": "line item name",
@@ -110,6 +114,10 @@ JSON object (no markdown, no prose) with exactly this shape:
   "total": "final amount charged as a number, or null",
   "channel": "Physical_Store or Online_Ecommerce (prefer Online_Ecommerce \
 for app trips, e-mail receipts and online orders)",
+  "cashier": "cashier/teller name if shown, else null",
+  "branch": "store branch if shown, else null",
+  "slip_number": "transaction/invoice/order number, or null",
+  "payment_method": "payment method line (e.g. Visa ****1234, Cash), or null",
   "items": [
     {{
       "name": "line item or charge name",
@@ -157,6 +165,10 @@ class ParsedReceipt:
     purchase_date: str | None = None
     total_amount: float | None = None
     channel_type: str | None = None
+    cashier: str | None = None
+    branch: str | None = None
+    slip_number: str | None = None
+    payment_method: str | None = None
     items: list[ParsedItem] = field(default_factory=list)
     loyalty: list[ParsedLoyalty] = field(default_factory=list)
     confidence: float = 0.0
@@ -293,6 +305,10 @@ def _parsed_from_gemini(raw: dict, user_key_hint: str | None = None) -> ParsedRe
         purchase_date=raw.get('date'),
         total_amount=round(float(total), 2) if total is not None else None,
         channel_type=channel if channel in ('Physical_Store', 'Online_Ecommerce') else None,
+        cashier=raw.get('cashier'),
+        branch=raw.get('branch'),
+        slip_number=raw.get('slip_number'),
+        payment_method=raw.get('payment_method'),
         items=items,
         loyalty=_loyalty_from_raw(raw),
         confidence=float(raw.get('confidence') or 0.8),
@@ -351,12 +367,17 @@ def analyze_receipt(file, category_names: list[str] | None = None, user_key: str
         logger.warning('Tesseract fallback unavailable: %s', exc)
         notes.append('No OCR engine available on this server — please add the receipt manually.')
         return ParsedReceipt(raw_text='', confidence=0.0, engine='tesseract', notes=notes)
+    identity = extract_slip_identity(legacy.raw_text)
     return ParsedReceipt(
         raw_text=legacy.raw_text,
         merchant_name=legacy.merchant_name,
         purchase_date=legacy.purchase_date,
         total_amount=legacy.total_amount,
         channel_type=None,
+        cashier=identity.get('cashier'),
+        branch=identity.get('branch'),
+        slip_number=identity.get('slip_number'),
+        payment_method=identity.get('payment_method'),
         items=[ParsedItem(name=i.name, price=i.price) for i in legacy.items],
         loyalty=_fallback_loyalty_parse(legacy.raw_text),
         confidence=0.45,
@@ -612,6 +633,10 @@ def analyze_receipt_text(text: str, category_names: list[str] | None = None, use
                 purchase_date=raw.get('date'),
                 total_amount=round(float(total), 2) if total is not None else None,
                 channel_type=channel if channel in ('Physical_Store', 'Online_Ecommerce') else None,
+                cashier=raw.get('cashier'),
+                branch=raw.get('branch'),
+                slip_number=raw.get('slip_number'),
+                payment_method=raw.get('payment_method'),
                 items=items,
                 loyalty=_loyalty_from_raw(raw),
                 confidence=float(raw.get('confidence') or 0.8),
@@ -638,3 +663,23 @@ def analyze_receipt_text(text: str, category_names: list[str] | None = None, use
         engine='tesseract',
         notes=notes,
     )
+
+
+def extract_slip_identity(text: str) -> dict:
+    """Best-effort regex read of slip-identity lines (cashier, branch, slip
+    number, payment) from raw receipt text — used by the tesseract/no-AI
+    fallback path where the structured prompt never ran."""
+    identity: dict = {}
+    m = re.search(r'cashier\s*[:#]?\s*([A-Za-z][A-Za-z .\'-]{1,40})', text, re.IGNORECASE)
+    if m:
+        identity['cashier'] = m.group(1).strip()
+    m = re.search(r'(?:branch|store)\s*(?:no\.?|#)?\s*[:#]?\s*([A-Za-z0-9 .&\'-]{2,60})', text, re.IGNORECASE)
+    if m:
+        identity['branch'] = m.group(1).strip()
+    m = re.search(r'(?:trans(?:action)?|invoice|slip|receipt|doc)\s*(?:no\.?|#|num(?:ber)?)\s*[:#]?\s*([A-Za-z0-9/-]{3,40})', text, re.IGNORECASE)
+    if m:
+        identity['slip_number'] = m.group(1).strip()
+    m = re.search(r'((?:visa|mastercard|amex|american express|maestro|debit|credit|cheque)\s*\**\s*\d{4}|cash|snapscan|zapper|eft|masterpass)', text, re.IGNORECASE)
+    if m:
+        identity['payment_method'] = m.group(1).strip()
+    return identity
