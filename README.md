@@ -190,6 +190,33 @@ bound to `0.0.0.0`).
 All features work without keys (dev fallbacks), so the app is fully usable
 out of the box.
 
+## Deploying
+
+**Frontend** — a standard Vite SPA: `npm run build` inside `frontend/`
+produces static output in `frontend/dist/` (verified: build exits cleanly
+with `index.html` + hashed assets + the PWA manifest/service worker).
+Static hosts need the usual SPA history fallback so `/dashboard`,
+`/receipts`, `/points` and `/settings` serve `index.html`.
+
+**API** — the Django backend is a long-running Python process (SQLite/
+Postgres, media uploads, JWT, admin), so it needs a Python host; it
+cannot run inside a Node-only static builder. Deploy it to any Python
+platform (or keep using the managed preview, which runs the full stack
+via `sh ./scripts/dev.sh`), then build the frontend with
+`VITE_API_BASE_URL=https://your-api-host/api` so the deployed app talks
+to it (unset, the built app expects the API at same-origin `/api`).
+
+**Backend production settings** (all env-driven, see `backend/.env.example`):
+`DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=<your-api-host>`,
+`CORS_ALLOWED_ORIGINS=<your-frontend-origin>`, `POSTGRES_HOST/NAME/USER/
+PASSWORD/PORT` for Postgres (SQLite is dev-only), plus the optional
+`GEMINI_API_KEY` / `RESEND_API_KEY` / `TELNYX_*` / `APPLE_CLIENT_ID` keys —
+users can now connect their own Gemini key in Settings, so the server key
+is only a fallback.
+
+**Scheduler** — the points-expiry email reminders need a daily cron (or
+platform scheduler) running `python manage.py send_points_reminders`.
+
 ## Still worth building next
 - **Mobile client**: the spec calls for Flutter; this repo gives you a web
   client instead. The Django API underneath is framework-agnostic either way.
