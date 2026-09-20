@@ -53,12 +53,12 @@ export const tokenStore = {
 export const api = axios.create({ baseURL: API_BASE_URL });
 
 // The deployed app reaches the API through a tunnel that can return 502/503
-// with "proxy upstream error" when the API server behind it is waking up or
-// restarting. Those are transient — retry a few times with short backoff so a
-// cold server heals itself in the UI instead of showing the user an error.
+// with "proxy upstream error" while the API server behind it wakes up (the
+// first request itself starts the wake). Those are transient — retry
+// transparently for up to ~30s so a cold start is absorbed silently and the
+// user only ever sees the button's normal "Sending…" state.
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1500;
+const RETRY_DELAYS_MS = [1500, 3000, 5000, 8000, 12000];
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -105,8 +105,8 @@ api.interceptors.response.use(
       !original._gatewayRetry
     ) {
       original._gatewayRetry = true;
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        await delay(RETRY_DELAY_MS * attempt);
+      for (const wait of RETRY_DELAYS_MS) {
+        await delay(wait);
         try {
           return await api(original);
         } catch (retryError) {

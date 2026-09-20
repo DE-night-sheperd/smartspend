@@ -37,11 +37,9 @@ export default function Register() {
       if (typeof detail === 'string' && detail) {
         setError(detail);
       } else if (status === 502 || status === 503 || status === 504 || err instanceof TypeError) {
-        // Gateway error or the network itself failed: the API server behind
-        // the tunnel is asleep or restarting — never the user's details.
-        setError(
-          'The SmartSpend server is waking up. Wait a few seconds and try again — it usually takes under a minute.',
-        );
+        // Gateway error or the network itself failed — a transient hiccup,
+        // never the user's details. Keep the language ordinary.
+        setError('Something took too long — please try again in a few seconds.');
       } else if (data && typeof data === 'object') {
         // DRF validation errors arrive as {field: [messages]} — show them
         // as the readable sentences they are (e.g. a taken email address).
