@@ -1378,6 +1378,84 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .points-critical { background: #fde2e0; color: #8c1d18; }
 .points-expired-toggle { display: flex; align-items: center; gap: 0.45rem; margin-top: 1rem; font-size: 0.85rem; color: var(--ink-soft); }
 
+
+/* ============================================================
+   TillSlip - realistic digital till slip (return-slip capable)
+   ============================================================ */
+.till-slip {
+  --slip-w: min(380px, 100%);
+  width: var(--slip-w);
+  margin: 0.8rem auto 0.4rem;
+  filter: drop-shadow(0 3px 6px rgba(22, 35, 28, 0.18));
+}
+.till-body {
+  background: repeating-linear-gradient(
+    0deg,
+    #fffdf6 0px, #fffdf6 28px,
+    #fbf7ea 28px, #fbf7ea 29px
+  );
+  color: #26302a;
+  font-family: 'Courier New', ui-monospace, monospace;
+  padding: 1rem 1.1rem 0.9rem;
+}
+.till-zigzag { height: 10px; background: #fffdf6; }
+.till-zigzag-top {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 97% 0, 94% 100%, 91% 0, 88% 100%, 85% 0, 82% 100%, 79% 0, 76% 100%, 73% 0, 70% 100%, 67% 0, 64% 100%, 61% 0, 58% 100%, 55% 0, 52% 100%, 49% 0, 46% 100%, 43% 0, 40% 100%, 37% 0, 34% 100%, 31% 0, 28% 100%, 25% 0, 22% 100%, 19% 0, 16% 100%, 13% 0, 10% 100%, 7% 0, 4% 100%, 0 0);
+}
+.till-zigzag-bottom {
+  clip-path: polygon(0 0, 3% 100%, 6% 0, 9% 100%, 12% 0, 15% 100%, 18% 0, 21% 100%, 24% 0, 27% 100%, 30% 0, 33% 100%, 36% 0, 39% 100%, 42% 0, 45% 100%, 48% 0, 51% 100%, 54% 0, 57% 100%, 60% 0, 63% 100%, 66% 0, 69% 100%, 72% 0, 75% 100%, 78% 0, 81% 100%, 84% 0, 87% 100%, 90% 0, 93% 100%, 96% 0, 100% 100%, 0 100%);
+}
+.till-head { text-align: center; border-bottom: 1px dashed #9aa39b; padding-bottom: 0.5rem; }
+.till-store { font-weight: 700; font-size: 1.15rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.till-sub { font-size: 0.78rem; color: #55605a; margin-top: 0.15rem; }
+.till-meta { padding: 0.5rem 0 0.2rem; font-size: 0.8rem; }
+.till-meta-row { display: flex; justify-content: space-between; gap: 0.6rem; }
+.till-meta-row span:first-child { color: #6b756e; }
+.till-meta-val { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.till-divider {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: #8a948c; font-size: 0.68rem; letter-spacing: 0.2em;
+  margin: 0.5rem 0 0.3rem;
+}
+.till-divider::before, .till-divider::after { content: ''; flex: 1; border-top: 1px dashed #9aa39b; }
+.till-items { list-style: none; margin: 0; padding: 0; font-size: 0.86rem; }
+.till-item { display: flex; gap: 0.25rem; line-height: 1.7; }
+.till-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 58%; }
+.till-item-dots { flex: 1; overflow: hidden; white-space: nowrap; color: #b3bcb4; }
+.till-item-price { white-space: nowrap; }
+.till-impulse { color: #b3591e; font-style: normal; font-weight: 700; }
+.till-total-row {
+  display: flex; justify-content: space-between;
+  border-top: 2px double #26302a; margin-top: 0.5rem; padding-top: 0.4rem;
+  font-weight: 700; font-size: 1.02rem; letter-spacing: 0.04em;
+}
+.till-barcode {
+  display: flex; align-items: stretch; justify-content: center; gap: 1px;
+  height: 34px; margin-top: 0.8rem;
+}
+.till-barcode .bar { background: #26302a; }
+.till-barcode .bar.gap { background: transparent; }
+.till-foot {
+  text-align: center; font-size: 0.68rem; letter-spacing: 0.28em;
+  color: #55605a; margin-top: 0.2rem;
+}
+.till-thanks {
+  text-align: center; font-size: 0.7rem; color: #8a948c;
+  margin-top: 0.55rem; border-top: 1px dashed #9aa39b; padding-top: 0.45rem;
+}
+.till-print-row { text-align: center; margin-top: 0.6rem; }
+.till-print-btn { font-size: 0.82rem; padding: 0.45rem 0.9rem; }
+.slip-identity { margin: 0.4rem 0 0.8rem; font-size: 0.9rem; }
+.slip-identity summary { cursor: pointer; font-weight: 600; color: var(--ink-soft); }
+.slip-identity[open] summary { margin-bottom: 0.4rem; }
+.slip-identity .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+@media print {
+  body * { visibility: hidden; }
+  .till-slip, .till-slip * { visibility: visible; }
+  .till-slip { position: absolute; left: 0; top: 0; width: 80mm; filter: none; }
+  .till-print-row { display: none; }
+}
+
 /* ---------- receipt form: loyalty chips ---------- */
 .loyalty-draft {
   display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center;

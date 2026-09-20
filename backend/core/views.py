@@ -742,6 +742,10 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'purchase_date': parsed.purchase_date,
             'total_amount': parsed.total_amount,
             'channel_type': parsed.channel_type,
+            'cashier': parsed.cashier,
+            'branch': parsed.branch,
+            'slip_number': parsed.slip_number,
+            'payment_method': parsed.payment_method,
             'items': [
                 {'name': i.name, 'price': i.price, 'category': i.category, 'is_impulse': i.is_impulse}
                 for i in parsed.items
@@ -786,6 +790,10 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             'purchase_date': parsed.purchase_date,
             'total_amount': parsed.total_amount,
             'channel_type': parsed.channel_type,
+            'cashier': parsed.cashier,
+            'branch': parsed.branch,
+            'slip_number': parsed.slip_number,
+            'payment_method': parsed.payment_method,
             'items': [
                 {'name': i.name, 'price': i.price, 'category': i.category, 'is_impulse': i.is_impulse}
                 for i in parsed.items

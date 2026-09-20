@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import TillSlip from '../components/TillSlip';
 import {
   attachReceiptImage,
   createReceipt,
@@ -364,7 +365,7 @@ export default function Receipts() {
               variants={{ hidden: { opacity: 0, y: 14, rotate: -1 }, show: { opacity: 1, y: 0, rotate: 0 } }}
               exit={{ opacity: 0, scale: 0.96 }}
             >
-              <div className="receipt-card-header">
+              <div className="receipt-card-header no-print">
                 {r.receipt_image && <img className="receipt-thumb" src={r.receipt_image} alt="" />}
                 <strong>{r.store_name}</strong>
                 <span>{r.purchase_date}</span>
@@ -384,14 +385,7 @@ export default function Receipts() {
                   </button>
                 </div>
               </div>
-              <ul className="item-list">
-                {r.items.map((it) => (
-                  <li key={it.item_id}>
-                    {it.item_name} × {it.quantity} — R{it.line_total ?? (Number(it.unit_price) * it.quantity).toFixed(2)}
-                    <span className={`category-badge ${it.is_impulse ? 'impulse' : ''}`}>{it.category_name}</span>
-                  </li>
-                ))}
-              </ul>
+              <TillSlip receipt={r} />
             </motion.li>
           ))}
         </AnimatePresence>
@@ -478,6 +472,12 @@ function ReceiptForm({
   const [totalAmount, setTotalAmount] = useState<string>(
     editing?.total_amount ?? (ocrDraft?.total_amount != null ? String(ocrDraft.total_amount) : ''),
   );
+  // Slip identity — printed on the slip so the digital copy works as a
+  // return slip at the store (cashier, branch, slip number, payment line).
+  const [cashier, setCashier] = useState(editing?.cashier_name ?? ocrDraft?.cashier ?? '');
+  const [branch, setBranch] = useState(editing?.branch_name ?? ocrDraft?.branch ?? '');
+  const [slipNumber, setSlipNumber] = useState(editing?.slip_number ?? ocrDraft?.slip_number ?? '');
+  const [paymentMethod, setPaymentMethod] = useState(editing?.payment_method ?? ocrDraft?.payment_method ?? '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -510,6 +510,10 @@ function ReceiptForm({
         total_amount: (totalAmount !== '' ? Number(totalAmount) : itemsTotal).toFixed(2),
         source_type: pendingImage ? ('camera' as const) : ('upload' as const),
         verified: true,
+        cashier_name: cashier.trim(),
+        branch_name: branch.trim(),
+        slip_number: slipNumber.trim(),
+        payment_method: paymentMethod.trim(),
         items: filled.map((it) => ({
           item_name: it.item_name.trim(),
           unit_price: it.unit_price === '' ? '0.00' : it.unit_price,
@@ -608,6 +612,29 @@ function ReceiptForm({
           <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} required />
         </label>
       </div>
+
+      <details className="slip-identity" open={Boolean(ocrDraft?.cashier || ocrDraft?.slip_number)}>
+        <summary>Slip details for returns (cashier, branch, slip no.)</summary>
+        <div className="form-row">
+          <label>
+            Cashier
+            <input value={cashier} onChange={(e) => setCashier(e.target.value)} placeholder="e.g. Thandi M." />
+          </label>
+          <label>
+            Branch
+            <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="e.g. Sandton City 1049" />
+          </label>
+          <label>
+            Slip / invoice no.
+            <input value={slipNumber} onChange={(e) => setSlipNumber(e.target.value)} placeholder="e.g. 1049 3821 5592" />
+          </label>
+          <label>
+            Payment
+            <input value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} placeholder="e.g. Visa ****1234 or Cash" />
+          </label>
+        </div>
+        <p className="field-hint">Saved on your receipt so the digital copy can be used for returns or disputes.</p>
+      </details>
 
       <h3>Line items</h3>
       {items.map((it, idx) => (
