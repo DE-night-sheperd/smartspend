@@ -31,13 +31,25 @@ export default function Register() {
       await login(form.email, form.password);
       navigate(returnTo, { replace: true });
     } catch (err: unknown) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(
-        typeof detail === 'string'
-          ? detail
-          : 'Could not create your account. Check your details and try again.',
-      );
+      const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+      const detail = data?.detail;
+      if (typeof detail === 'string' && detail) {
+        setError(detail);
+      } else if (data && typeof data === 'object') {
+        // DRF validation errors arrive as {field: [messages]} — show them
+        // as the readable sentences they are (e.g. a taken email address).
+        const messages = Object.entries(data).flatMap(([, value]) =>
+          Array.isArray(value) ? value.map(String) : [String(value)],
+        );
+        const emailTaken = messages.some((m) => m.toLowerCase().includes('already exists'));
+        setError(
+          emailTaken
+            ? 'That email is already registered. Try logging in instead — or use a one-time code.'
+            : messages.join(' '),
+        );
+      } else {
+        setError('Could not create your account. Check your details and try again.');
+      }
       setSubmitting(false);
     }
   }
@@ -79,7 +91,17 @@ export default function Register() {
             required
           />
         </label>
-        {error && <p className="form-error">{error}</p>}
+        {error && (
+          <p className="form-error">
+            {error}
+            {error.toLowerCase().includes('already registered') && (
+              <>
+                {' '}
+                <Link to="/login">Go to log in</Link>
+              </>
+            )}
+          </p>
+        )}
         <button type="submit" disabled={submitting}>
           {submitting ? 'Creating account…' : 'Sign up'}
         </button>
