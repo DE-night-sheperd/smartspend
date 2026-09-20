@@ -19,9 +19,10 @@ from django.db.models import Q, Sum
 from django.db.models.functions import TruncMonth
 
 from .apple_auth import verify_apple_identity_token
+from .crypto import mask_secret
 from .emails import send_login_code_email
 from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
-from .receipt_ai import analyze_receipt, analyze_receipt_text
+from .receipt_ai import analyze_receipt, analyze_receipt_text, verify_gemini_key
 from .reports import build_monthly_audit_pdf
 from .serializers import (
     AppleSignInSerializer,
@@ -430,6 +431,67 @@ def _verify_and_sign_in(destination: str, code: str, identity_defaults: dict | N
     )
 
 
+class GeminiKeyStatusView(generics.GenericAPIView):
+    """GET /api/me/gemini-key/ — connection status without ever returning
+    the key itself."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        connected = request.user.has_gemini_key
+        return Response({
+            'connected': connected,
+            'key_hint': mask_secret(request.user.gemini_key) if connected else '',
+        })
+
+
+class GeminiKeyConnectView(generics.GenericAPIView):
+    """POST /api/me/gemini-key/connect/ — connect the user's own Gemini
+    API key (BYOK). Google has no OAuth flow that mints Gemini keys for a
+    third-party app, so the flow is: send the user to AI Studio (they're
+    signed in as themselves), they create a free key, paste it here; we
+    verify it against Google and store it encrypted at rest.
+
+    Their scans then use their key/quota before the server's shared key;
+    disconnecting removes it. Keys are never returned by any endpoint.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        raw_key = str(request.data.get('api_key') or '').strip()
+        if not raw_key:
+            raise ParseError('Send the key under the "api_key" field.')
+        if len(raw_key) > 256:
+            return Response(
+                {'detail': 'That does not look like a Gemini API key.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ok, message = verify_gemini_key(raw_key)
+        if not ok:
+            return Response({'detail': message}, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.set_gemini_key(raw_key)
+        request.user.save(update_fields=['gemini_key_encrypted'])
+        return Response({
+            'detail': message,
+            'connected': True,
+            'key_hint': mask_secret(request.user.gemini_key),
+        })
+
+
+class GeminiKeyDisconnectView(generics.GenericAPIView):
+    """POST /api/me/gemini-key/disconnect/ — forget the stored key."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        request.user.clear_gemini_key()
+        request.user.save(update_fields=['gemini_key_encrypted'])
+        return Response({'connected': False})
+
+
 class StoreViewSet(viewsets.ModelViewSet):
     """Shared reference data — every authenticated user can read/add stores."""
 
@@ -656,7 +718,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
 
         category_names = list(Category.objects.values_list('category_name', flat=True))
         try:
-            parsed = analyze_receipt(image, category_names)
+            parsed = analyze_receipt(image, category_names, user_key=request.user.gemini_key or None)
         except Exception as exc:  # noqa: BLE001 — extraction failures shouldn't 500 the app
             return Response(
                 {'detail': f'Could not read this image: {exc}'},
@@ -700,7 +762,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
 
         category_names = list(Category.objects.values_list('category_name', flat=True))
         try:
-            parsed = analyze_receipt_text(text, category_names)
+            parsed = analyze_receipt_text(text, category_names, user_key=request.user.gemini_key or None)
         except Exception as exc:  # noqa: BLE001 — extraction failures shouldn't 500 the app
             return Response(
                 {'detail': f'Could not read this receipt text: {exc}'},

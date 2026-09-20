@@ -645,3 +645,94 @@ class LoyaltyPointsTest(TestCase):
         self.assertIn('300', joined)
         self.assertIn('75', joined)
         self.assertNotIn('40', joined)
+
+
+class GeminiByokTest(TestCase):
+    """Bring-your-own Gemini key: connect (verified + encrypted at rest),
+    status, disconnect, and scan priority (user key before the server's)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='byok@example.com', password='pass12345')
+        self.client = auth_client(self.user)
+
+    def test_status_disconnected_by_default(self):
+        response = self.client.get(reverse('gemini_key_status'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['connected'])
+        self.assertEqual(response.data['key_hint'], '')
+
+    def test_connect_rejects_key_google_refuses(self):
+        with mock.patch('core.views.verify_gemini_key', return_value=(False, 'Google rejected that key.')):
+            response = self.client.post(
+                reverse('gemini_key_connect'), {'api_key': 'AIzaNotARealKey'}, format='json'
+            )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.has_gemini_key)  # unverified keys are never stored
+
+    def test_connect_stores_key_encrypted_and_masks_hint(self):
+        with mock.patch(
+            'core.views.verify_gemini_key', return_value=(True, 'Connected')
+        ):
+            response = self.client.post(
+                reverse('gemini_key_connect'), {'api_key': 'AIzaSyA0123456789abcdefgh'}, format='json'
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['connected'])
+        self.user.refresh_from_db()
+        # Stored encrypted, not as plaintext.
+        self.assertNotIn('AIzaSyA0123456789abcdefgh', self.user.gemini_key_encrypted)
+        self.assertEqual(self.user.gemini_key, 'AIzaSyA0123456789abcdefgh')
+        # Status reports a masked hint only — never the key itself.
+        status_response = self.client.get(reverse('gemini_key_status'))
+        self.assertTrue(status_response.data['connected'])
+        self.assertNotIn('AIzaSyA0123456789abcdefgh', status_response.content.decode())
+
+    def test_disconnect_clears_key(self):
+        self.user.set_gemini_key('AIzaSyA0123456789abcdefgh')
+        self.user.save(update_fields=['gemini_key_encrypted'])
+        response = self.client.post(reverse('gemini_key_disconnect'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.has_gemini_key)
+
+    def test_connect_requires_auth(self):
+        response = APIClient().post(reverse('gemini_key_connect'), {'api_key': 'x'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_scan_uses_user_key_before_server_key(self):
+        """A connected user's scans call Gemini with THEIR key, even when a
+        server key exists; users without one keep using the server key."""
+        self.user.set_gemini_key('AIzaUserKey')
+        self.user.save(update_fields=['gemini_key_encrypted'])
+        with override_settings(GEMINI_API_KEY='AIzaServerKey'):
+            with mock.patch(
+                'core.receipt_ai._gemini_extract',
+                return_value={'merchant': 'Pick n Pay', 'items': [], 'confidence': 0.9},
+            ) as gemini:
+                response = self.client.post(reverse('receipt-ocr-extract'), {'image': _png_file()})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(gemini.call_args.kwargs['api_key'], 'AIzaUserKey')
+
+    def test_scan_without_user_key_uses_server_key(self):
+        with override_settings(GEMINI_API_KEY='AIzaServerKey'):
+            with mock.patch(
+                'core.receipt_ai._gemini_extract',
+                return_value={'merchant': 'Uber', 'items': [], 'confidence': 0.9},
+            ) as gemini:
+                response = self.client.post(reverse('receipt-ocr-extract'), {'image': _png_file()})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(gemini.call_args.kwargs['api_key'], 'AIzaServerKey')
+
+
+def _png_file():
+    """A 1x1 PNG as an uploadable file for ocr_extract tests."""
+    import io
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new('RGB', (1, 1), 'white').save(buffer, format='PNG')
+    buffer.seek(0)
+    return SimpleUploadedFile('slip.png', buffer.read(), content_type='image/png')

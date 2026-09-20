@@ -16,11 +16,12 @@ import {
 } from 'recharts';
 import {
   downloadMonthlyAuditPdf,
+  getGeminiKeyStatus,
   getMonthBreakdown,
   getMonthlyAnalytics,
   listPoints,
 } from '../api/endpoints';
-import type { LoyaltyPointsRow, MonthBreakdown, MonthlyAnalytics } from '../types';
+import type { GeminiKeyStatus, LoyaltyPointsRow, MonthBreakdown, MonthlyAnalytics } from '../types';
 import { useAuth } from '../context/AuthContext';
 import AnimatedNumber from '../components/AnimatedNumber';
 import { celebrate } from '../lib/celebrate';
@@ -52,6 +53,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [points, setPoints] = useState<LoyaltyPointsRow[]>([]);
+  const [gemini, setGemini] = useState<GeminiKeyStatus | null>(null);
+  const [geminiBannerDismissed, setGeminiBannerDismissed] = useState(false);
   const celebrated = useRef(false);
 
   useEffect(() => {
@@ -60,6 +63,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     listPoints().then(setPoints).catch(() => setPoints([]));
+  }, []);
+
+  // Prompt users to connect their own Gemini key (BYOK) until they do —
+  // Google only issues keys inside the user's own AI Studio account, so the
+  // nudge points at Settings where the paste-and-verify flow lives.
+  useEffect(() => {
+    getGeminiKeyStatus().then(setGemini).catch(() => setGemini({ connected: false, key_hint: '' }));
   }, []);
 
   const loadBreakdown = useCallback((year: number, month: number) => {
@@ -156,6 +166,28 @@ export default function Dashboard() {
         >
           ⏰ {expiringTotal.toLocaleString()} points expire within 7 days ({expiringPoints.map((p) => `${p.store_name}: ${p.points.toLocaleString()}`).join(', ')}).{' '}
           <Link to="/points">Spend them before they lapse</Link>
+        </motion.div>
+      )}
+
+      {gemini && !gemini.connected && !geminiBannerDismissed && (
+        <motion.div
+          className="gemini-banner"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <span>
+            🔑 Scans currently use SmartSpend's shared AI reader.{' '}
+            <Link to="/settings">Connect your own free Gemini key</Link> so receipts use your quota
+            instead.
+          </span>
+          <button
+            type="button"
+            className="link-button"
+            aria-label="Dismiss"
+            onClick={() => setGeminiBannerDismissed(true)}
+          >
+            ✕
+          </button>
         </motion.div>
       )}
 

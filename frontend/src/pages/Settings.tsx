@@ -1,8 +1,14 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
-import { exportReceiptsCsv, updateMe } from '../api/endpoints';
+import {
+  connectGeminiKey,
+  disconnectGeminiKey,
+  exportReceiptsCsv,
+  getGeminiKeyStatus,
+  updateMe,
+} from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import type { User } from '../types';
+import type { GeminiKeyStatus, User } from '../types';
 
 export default function Settings() {
   const { user, refreshUser } = useAuth();
@@ -16,9 +22,53 @@ export default function Settings() {
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [error, setError] = useState<string | null>(null);
 
+  // BYOK Gemini connection
+  const [gemini, setGemini] = useState<GeminiKeyStatus | null>(null);
+  const [geminiKeyInput, setGeminiKeyInput] = useState('');
+  const [geminiBusy, setGeminiBusy] = useState(false);
+  const [geminiMessage, setGeminiMessage] = useState<string | null>(null);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
     setStatus('idle');
+  }
+
+  useEffect(() => {
+    getGeminiKeyStatus().then(setGemini).catch(() => setGemini({ connected: false, key_hint: '' }));
+  }, []);
+
+  async function handleGeminiConnect(e: FormEvent) {
+    e.preventDefault();
+    setGeminiBusy(true);
+    setGeminiError(null);
+    setGeminiMessage(null);
+    try {
+      const result = await connectGeminiKey(geminiKeyInput.trim());
+      setGemini({ connected: true, key_hint: result.key_hint });
+      setGeminiKeyInput('');
+      setGeminiMessage(result.detail);
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setGeminiError(typeof detail === 'string' ? detail : 'Could not connect that key. Try again.');
+    } finally {
+      setGeminiBusy(false);
+    }
+  }
+
+  async function handleGeminiDisconnect() {
+    setGeminiBusy(true);
+    setGeminiError(null);
+    setGeminiMessage(null);
+    try {
+      await disconnectGeminiKey();
+      setGemini({ connected: false, key_hint: '' });
+      setGeminiMessage('Disconnected. Scans fall back to the built-in reader.');
+    } catch {
+      setGeminiError('Could not disconnect. Try again.');
+    } finally {
+      setGeminiBusy(false);
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -116,6 +166,61 @@ export default function Settings() {
           {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : 'Save settings'}
         </button>
       </motion.form>
+
+      <motion.section
+        className="settings-card"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.06 }}
+      >
+        <h2>AI scanning (Gemini)</h2>
+        <p className="field-hint">
+          Connect your own free Gemini key so receipt scans use <strong>your</strong> quota instead
+          of SmartSpend's shared one. Google creates keys only inside your own AI Studio account —
+          grab one while signed in, paste it here, and we verify and store it encrypted. It is never
+          shown again and can be removed anytime.
+        </p>
+        {gemini?.connected ? (
+          <div className="gemini-status">
+            <span className="points-badge points-ok">Connected · {gemini.key_hint}</span>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => void handleGeminiDisconnect()}
+              disabled={geminiBusy}
+            >
+              Disconnect
+            </button>
+          </div>
+        ) : (
+          <form className="gemini-connect" onSubmit={handleGeminiConnect}>
+            <a
+              className="gemini-studio-link"
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noreferrer"
+            >
+              1. Get your free key at Google AI Studio ↗
+            </a>
+            <label>
+              2. Paste your Gemini API key
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder="AIza…"
+                value={geminiKeyInput}
+                onChange={(e) => setGeminiKeyInput(e.target.value)}
+                required
+              />
+            </label>
+            <button type="submit" disabled={geminiBusy || geminiKeyInput.trim().length < 20}>
+              {geminiBusy ? 'Verifying…' : 'Connect Gemini'}
+            </button>
+          </form>
+        )}
+        {geminiMessage && <p className="field-hint">{geminiMessage}</p>}
+        {geminiError && <p className="form-error">{geminiError}</p>}
+      </motion.section>
 
       <motion.section
         className="settings-card"
