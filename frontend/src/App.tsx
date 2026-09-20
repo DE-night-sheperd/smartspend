@@ -12,7 +12,13 @@ import Receipts from './pages/Receipts';
 import Points from './pages/Points';
 import Settings from './pages/Settings';
 import Privacy from './pages/Privacy';
+import { warmUpApi } from './api/client';
 import './App.css';
+
+// Fire a background health ping as soon as anyone opens the app, so a
+// suspended API starts waking up while the user types their details — by the
+// time they tap Sign up / Send code, it usually answers on the first try.
+void warmUpApi();
 
 function AnimatedRoutes() {
   const location = useLocation();
