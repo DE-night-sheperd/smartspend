@@ -37,6 +37,19 @@ export const API_BASE_URL = import.meta.env.PROD
 const ACCESS_KEY = 'smartspend_access';
 const REFRESH_KEY = 'smartspend_refresh';
 
+/**
+ * Fire-and-forget health ping: touching the API starts waking a suspended
+ * server. Called once when the app loads so the wake happens while the user
+ * is still typing their details. Never throws.
+ */
+export function warmUpApi(): void {
+  if (import.meta.env.PROD) {
+    void axios
+      .get(`${API_BASE_URL}/auth/config/`, { timeout: 45_000 })
+      .catch(() => undefined);
+  }
+}
+
 export const tokenStore = {
   getAccess: () => localStorage.getItem(ACCESS_KEY),
   getRefresh: () => localStorage.getItem(REFRESH_KEY),
@@ -97,13 +110,11 @@ api.interceptors.response.use(
       _gatewayRetry?: boolean;
     };
     const status = error.response?.status;
-    // Retry transient gateway errors (server waking behind the proxy).
-    if (
-      status &&
-      RETRYABLE_STATUS.has(status) &&
-      original &&
-      !original._gatewayRetry
-    ) {
+    // Retry transient gateway errors (server waking behind the proxy) AND
+    // network-level failures (a fully-suspended server drops the connection
+    // before any HTTP status exists). Retrying is what starts the wake.
+    const transient = (status !== undefined && RETRYABLE_STATUS.has(status)) || status === undefined;
+    if (transient && original && !original._gatewayRetry) {
       original._gatewayRetry = true;
       for (const wait of RETRY_DELAYS_MS) {
         await delay(wait);
@@ -111,7 +122,9 @@ api.interceptors.response.use(
           return await api(original);
         } catch (retryError) {
           const retryStatus = (retryError as AxiosError).response?.status;
-          if (!retryStatus || !RETRYABLE_STATUS.has(retryStatus)) {
+          const retryTransient =
+            retryStatus === undefined || (retryStatus !== undefined && RETRYABLE_STATUS.has(retryStatus));
+          if (!retryTransient) {
             throw retryError;
           }
           error = retryError as AxiosError;

@@ -39,7 +39,7 @@ export default function Register() {
       } else if (status === 502 || status === 503 || status === 504 || err instanceof TypeError) {
         // Gateway error or the network itself failed — a transient hiccup,
         // never the user's details. Keep the language ordinary.
-        setError('Something took too long — please try again in a few seconds.');
+        setError('Taking longer than usual — one more tap should do it.');
       } else if (data && typeof data === 'object') {
         // DRF validation errors arrive as {field: [messages]} — show them
         // as the readable sentences they are (e.g. a taken email address).

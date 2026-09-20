@@ -95,7 +95,7 @@ export default function Login() {
           detail?.phone?.[0] ??
           detail?.email?.[0] ??
           (unreachable
-            ? 'That took too long — please tap the button again in a few seconds.'
+            ? 'Taking longer than usual — one more tap should do it.'
             : 'Could not send a code. Check the details and try again.'),
       );
     } finally {
