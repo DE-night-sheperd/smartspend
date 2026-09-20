@@ -192,11 +192,13 @@ out of the box.
 
 ## Deploying
 
-**Frontend** — a standard Vite SPA: `npm run build` inside `frontend/`
-produces static output in `frontend/dist/` (verified: build exits cleanly
-with `index.html` + hashed assets + the PWA manifest/service worker).
-Static hosts need the usual SPA history fallback so `/dashboard`,
-`/receipts`, `/points` and `/settings` serve `index.html`.
+**Frontend** — a standard Vite SPA. The repo root carries a `package.json`
+and `vite.config.ts` so managed hosting can detect the Vite + React stack:
+`npm run build` from the **repo root** builds the app out of `frontend/`
+and emits static output to `dist/` at the root (verified: clean exit with
+`index.html` + hashed assets + the PWA manifest/service worker). Static
+hosts need the usual SPA history fallback so `/dashboard`, `/receipts`,
+`/points` and `/settings` serve `index.html`.
 
 **API** — the Django backend is a long-running Python process (SQLite/
 Postgres, media uploads, JWT, admin), so it needs a Python host; it
