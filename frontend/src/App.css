@@ -262,6 +262,21 @@ button:disabled { opacity: 0.55; cursor: default; box-shadow: none; }
 }
 .linklike:hover { transform: none; }
 
+/* Full-width link styled as the primary button — used by the password-reset
+   "done" card so it reads as an action, not another nav link. */
+.button-link {
+  display: block;
+  text-align: center;
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  background: var(--indigo);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transition: filter 0.15s;
+}
+.button-link:hover { filter: brightness(1.08); }
+
 .auth-card label {
   display: flex;
   flex-direction: column;
@@ -1503,3 +1518,41 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .gemini-connect button { align-self: flex-start; }
 .gemini-studio-link { font-size: 0.88rem; color: var(--indigo); font-weight: 600; }
 .gemini-status { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.7rem; flex-wrap: wrap; }
+
+/* ---------- full-capability additions: points CRUD, password, load-more ---------- */
+.points-actions { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.points-action {
+  border: 1.5px solid var(--line); background: #fffdf5; border-radius: 7px;
+  min-width: 2.1rem; height: 2.1rem; padding: 0 0.55rem; cursor: pointer;
+  font-size: 0.9rem; line-height: 1; color: var(--ink); transition: border-color 0.15s, background 0.15s;
+}
+.points-action:hover { border-color: var(--indigo); background: #fff; }
+.points-action-danger { border-color: #e8483a; color: #8c1d18; font-weight: 700; }
+.points-action-danger:hover { background: #fde2e0; }
+.points-editor {
+  background: #fffdf5; border: 1.5px solid var(--line); border-radius: 12px;
+  padding: 1.1rem 1.2rem; margin: 0.8rem 0 1.2rem; display: flex; flex-direction: column; gap: 0.7rem;
+}
+.points-editor h2 { margin: 0; font-size: 1.05rem; }
+.points-editor .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.points-editor button[type="submit"] { align-self: flex-start; }
+.load-more {
+  display: block; margin: 1.2rem auto 0; padding: 0.6rem 1.4rem;
+  border: 1.5px dashed var(--line); border-radius: 999px; background: #fffdf5;
+  color: var(--ink-soft); font-weight: 600; cursor: pointer; transition: border-color 0.15s, color 0.15s;
+}
+.load-more:hover:not(:disabled) { border-color: var(--indigo); color: var(--ink); }
+.load-more:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 560px) { .points-editor .form-row { grid-template-columns: 1fr; } }
+
+/* ---------- budget advice (dashboard) ---------- */
+.advice-card { margin-top: 1rem; }
+.advice-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  width: 100%; background: none; border: none; padding: 0; cursor: pointer;
+  text-align: left; font: inherit; color: inherit;
+}
+.advice-toggle:hover .chart-title { color: var(--indigo); }
+.advice-chevron { font-size: 1rem; color: var(--ink-soft); }
+.advice-list li small { display: block; margin-top: 0.15rem; }
+.advice-saving { color: #1e5c2e; }

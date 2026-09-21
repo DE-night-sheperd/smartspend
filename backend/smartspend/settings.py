@@ -181,6 +181,10 @@ MEDIA_ROOT = BASE_DIR / 'media'
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 RESEND_FROM = os.environ.get('RESEND_FROM', 'SmartSpend <onboarding@resend.dev>')
 DEFAULT_FROM_EMAIL = RESEND_FROM
+
+# Shared secret for the automated-reminders cron endpoint (POST /api/cron/daily/,
+# header X-Cron-Key). Left empty, the endpoint refuses to run (503).
+CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY', '')
 if not RESEND_API_KEY:
     # Django's default is SMTP (localhost:25) which fails without a mail
     # server — force the console backend so the code flow works out of the box.

@@ -18,6 +18,16 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   first login. Codes are delivered through [Resend](https://resend.com) when
   `RESEND_API_KEY` is set, or printed to the runserver console in dev
   (the response also carries `dev_code` so the UI can show it).
+  When a provider refuses the send (e.g. Resend's testing mode with no
+  verified domain) the API returns 502 with an actionable hint instead of a
+  silent generic failure — so "codes never arrive" always says why.
+- **Forgot password** (`/api/auth/password-reset/` + `/verify/` + `/confirm/`):
+  the same hardened code machinery — single-use, 10-minute TTL, 5 wrong
+  attempts, shared 5-per-hour rate limit — used to set a new password by
+  email. Unregistered addresses get the same response shape (no account
+  probing), verification never burns the code, code-login accounts are told
+  to sign in with a code instead, and the code is consumed only when the new
+  password is actually set.
 - **Passwordless SMS- and WhatsApp-code login** (`/api/auth/login-code/sms/`,
   `/api/auth/login-code/whatsapp/` + their `verify-` twins): the
   phone-number twin of the email flow — same code model, same rate limit,
@@ -96,6 +106,15 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
 - `GET /api/receipts/month_breakdown/?year=&month=` — deep-dive analytics for
   one month: daily totals, per-category and per-store totals, channel split,
   essential vs impulse spend, and the biggest single purchase.
+- **Automated budget-adjustment suggestions** (`GET
+  /api/receipts/budget_advice/?year=&month=`): concrete, ranked "cut X to
+  save Y" moves computed from the month's own receipts — trims the biggest
+  non-essential categories by 25%, names the biggest impulse buy to skip,
+  projects the month-end landing spot mid-month and gives the daily trim
+  that gets back under budget, nudges batching when one store sees 3+
+  separate trips, and compares the month against the previous one. Rule-based
+  and deterministic (no AI call, no key needed), it shows up as a "Ways to
+  save this month" card on the dashboard and as section 5 of the audit PDF.
 - **Budget settings**: the user's `monthly_budget_limit` is editable only
   from the Settings page (`PATCH /api/me/`) — registration never asks for
   it — and drives the dashboard thermometer, variance stats, and the
@@ -121,7 +140,9 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   every CTA funnels into `/register` or `/login`.
 - **Email or SMS code login UI** — the login page has a channel toggle:
   pick email or phone, get a 6-digit code, verify, done. Dev mode shows the
-  code inline when no delivery provider is configured.
+  code inline when no delivery provider is configured. "Forgot your
+  password?" opens an in-page reset flow (email → code → new password) that
+  rides the same countdown/resend UI.
 - **Auth-gated app**: the dashboard lives at `/dashboard` and every
   authenticated route (dashboard, receipts, settings) redirects signed-out
   visitors to `/login?returnTo=<original-path>`; after sign-in they land
@@ -228,5 +249,3 @@ platform scheduler) running `python manage.py send_points_reminders`.
   `GEMINI_API_KEY` set, the AI path already handles layout natively.
 - **PostGIS merchant location tracking**, mentioned in the technical spec,
   isn't implemented — `Store` has no location field yet.
-- **Automated budget-adjustment suggestions**: the audit PDF reports current
-  spend, but doesn't yet generate specific "cut X to save Y" suggestions.

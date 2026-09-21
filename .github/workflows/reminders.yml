@@ -1,0 +1,33 @@
+name: Daily reminders
+
+# The free always-on scheduler for SmartSpend's automated notifications.
+# Every day at 07:00 South Africa time (05:00 UTC) it calls the backend's
+# cron endpoint, which emails users whose loyalty points expire in 7 days
+# or 1 day, plus 80%-used and over-budget warnings (each fires at most
+# once per user per period — the endpoint dedupes, so retries are safe).
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch: {} # manual "Run workflow" button for testing
+
+jobs:
+  reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fire the daily-reminders endpoint
+        env:
+          CRON_URL: ${{ secrets.CRON_URL }}
+          CRON_SECRET_KEY: ${{ secrets.CRON_SECRET_KEY }}
+        run: |
+          if [ -z "$CRON_URL" ] || [ -z "$CRON_SECRET_KEY" ]; then
+            echo "CRON_URL / CRON_SECRET_KEY secrets not set — skipping (configure them in repo settings)."
+            exit 0
+          fi
+          http=$(curl -s -o /tmp/cron_out.json -w "%{http_code}" -X POST \
+            -H "X-Cron-Key: $CRON_SECRET_KEY" \
+            --max-time 60 \
+            "$CRON_URL")
+          echo "HTTP $http"
+          cat /tmp/cron_out.json
+          test "$http" = "200"

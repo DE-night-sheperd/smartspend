@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
 import {
+  changePassword,
   connectGeminiKey,
   disconnectGeminiKey,
   exportReceiptsCsv,
@@ -28,6 +29,11 @@ export default function Settings() {
   const [geminiBusy, setGeminiBusy] = useState(false);
   const [geminiMessage, setGeminiMessage] = useState<string | null>(null);
   const [geminiError, setGeminiError] = useState<string | null>(null);
+
+  // Change password
+  const [pwForm, setPwForm] = useState({ old_password: '', new_password: '', confirm: '' });
+  const [pwStatus, setPwStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [pwError, setPwError] = useState<string | null>(null);
 
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -68,6 +74,27 @@ export default function Settings() {
       setGeminiError('Could not disconnect. Try again.');
     } finally {
       setGeminiBusy(false);
+    }
+  }
+
+  async function handlePasswordChange(e: FormEvent) {
+    e.preventDefault();
+    setPwError(null);
+    if (pwForm.new_password !== pwForm.confirm) {
+      setPwError('The two new passwords do not match.');
+      return;
+    }
+    setPwStatus('saving');
+    try {
+      await changePassword(pwForm.old_password, pwForm.new_password);
+      setPwForm({ old_password: '', new_password: '', confirm: '' });
+      setPwStatus('saved');
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { old_password?: string[]; new_password?: string[] } } })
+        ?.response?.data;
+      const msg = detail?.old_password?.[0] ?? detail?.new_password?.[0];
+      setPwError(msg ?? 'Could not change your password. Try again.');
+      setPwStatus('idle');
     }
   }
 
@@ -166,6 +193,64 @@ export default function Settings() {
           {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : 'Save settings'}
         </button>
       </motion.form>
+
+      <motion.section
+        className="settings-card"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.05 }}
+      >
+        <h2>Password</h2>
+        <p className="field-hint">
+          Used when you log in with a password. Email-code logins keep working either way.
+        </p>
+        <form onSubmit={handlePasswordChange}>
+          <label>
+            Current password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={pwForm.old_password}
+              onChange={(e) => {
+                setPwForm((f) => ({ ...f, old_password: e.target.value }));
+                setPwStatus('idle');
+              }}
+              required
+            />
+          </label>
+          <label>
+            New password (min 8 characters)
+            <input
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={pwForm.new_password}
+              onChange={(e) => {
+                setPwForm((f) => ({ ...f, new_password: e.target.value }));
+                setPwStatus('idle');
+              }}
+              required
+            />
+          </label>
+          <label>
+            Confirm new password
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={pwForm.confirm}
+              onChange={(e) => {
+                setPwForm((f) => ({ ...f, confirm: e.target.value }));
+                setPwStatus('idle');
+              }}
+              required
+            />
+          </label>
+          {pwError && <p className="form-error">{pwError}</p>}
+          <button type="submit" disabled={pwStatus === 'saving'}>
+            {pwStatus === 'saving' ? 'Updating…' : pwStatus === 'saved' ? 'Password updated ✓' : 'Change password'}
+          </button>
+        </form>
+      </motion.section>
 
       <motion.section
         className="settings-card"

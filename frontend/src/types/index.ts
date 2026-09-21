@@ -102,6 +102,24 @@ export interface MonthBreakdown {
   } | null;
 }
 
+/** One "cut X to save Y" suggestion from /receipts/budget_advice/. */
+export interface BudgetSuggestion {
+  kind: 'category_cut' | 'impulse' | 'pacing' | 'store_frequency' | 'trend';
+  title: string;
+  detail: string;
+  potential_saving: string;
+}
+
+export interface BudgetAdvice {
+  year: number;
+  month: number;
+  budget_limit: string;
+  total_spent: string;
+  has_budget: boolean;
+  suggestions: BudgetSuggestion[];
+  potential_total_saving: string;
+}
+
 export interface LoyaltyDraft {
   points: number;
   label?: string;

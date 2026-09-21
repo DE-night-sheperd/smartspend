@@ -51,6 +51,8 @@ function sumItems(items: ItemDraft[]): number {
 
 export default function Receipts() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [limit, setLimit] = useState(25);
   const [stores, setStores] = useState<Store[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,18 +69,22 @@ export default function Receipts() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [filters, setFilters] = useState<ReceiptFilters>(emptyFilters);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  async function loadReceipts() {
+  async function loadReceipts(overrides?: Partial<ReceiptFilters>) {
+    const f = { ...filters, ...overrides };
     const params = Object.fromEntries(
-      Object.entries(filters).filter(([, v]) => v !== ''),
+      Object.entries(f).filter(([, v]) => v !== ''),
     );
-    const r = await listReceipts(params);
-    setReceipts(r);
+    const r = await listReceipts({ ...params, limit: String(limit) });
+    setReceipts(r.results);
+    setTotalCount(r.count);
   }
 
   async function loadAll() {
-    const [r, s, c] = await Promise.all([listReceipts(), listStores(), listCategories()]);
-    setReceipts(r);
+    const [r, s, c] = await Promise.all([listReceipts({ limit: String(limit) }), listStores(), listCategories()]);
+    setReceipts(r.results);
+    setTotalCount(r.count);
     setStores(s);
     setCategories(c);
     setLoading(false);
@@ -97,6 +103,16 @@ export default function Receipts() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
+
+  // Re-fetch when the user asks for a longer list ("Show more").
+  useEffect(() => {
+    if (limit === 25) return; // initial load handled by loadAll
+    setLoadingMore(true);
+    loadReceipts()
+      .catch(() => undefined)
+      .finally(() => setLoadingMore(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit]);
 
   function setFilter<K extends keyof ReceiptFilters>(key: K, value: string) {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -348,6 +364,19 @@ export default function Receipts() {
       {loading && <p>Loading receipts…</p>}
       {!loading && receipts.length === 0 && !showForm && (
         <p className="empty-state">No receipts yet — scan or add your first one above.</p>
+      )}
+
+      {/* Load more: the API pages at 25 — keep revealing rather than hiding. */}
+      {!loading && receipts.length < totalCount && (
+        <button
+          className="load-more"
+          onClick={() => setLimit((l) => l + 25)}
+          disabled={loadingMore}
+        >
+          {loadingMore
+            ? 'Loading…'
+            : `Show more (${receipts.length} of ${totalCount})`}
+        </button>
       )}
 
       <motion.ul

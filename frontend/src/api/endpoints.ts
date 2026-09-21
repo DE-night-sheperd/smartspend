@@ -4,6 +4,7 @@ import type {
   GeminiKeyConnectResult,
   GeminiKeyStatus,
   LoyaltyPointsRow,
+  BudgetAdvice,
   MonthBreakdown,
   MonthlyAnalytics,
   OcrDraft,
@@ -33,6 +34,26 @@ export async function verifyLoginCode(
 ): Promise<{ access: string; refresh: string; created_account: boolean }> {
   const { data } = await api.post('/auth/verify-login-code/', { email, code });
   tokenStore.setTokens(data.access, data.refresh);
+  return data;
+}
+
+/** Forgot password: request a 6-digit reset code by email. The response
+ * never reveals whether the address is registered. */
+export async function requestPasswordReset(email: string): Promise<{ detail: string }> {
+  const { data } = await api.post('/auth/password-reset/', { email });
+  return data;
+}
+
+/** Check a reset code without consuming it. Fails with a message when the
+ * account signs in with one-time codes instead of a password. */
+export async function verifyPasswordResetCode(email: string, code: string): Promise<{ detail: string; verified: boolean }> {
+  const { data } = await api.post('/auth/password-reset/verify/', { email, code });
+  return data;
+}
+
+/** Set a new password using a valid reset code (consumes it). */
+export async function confirmPasswordReset(email: string, code: string, newPassword: string): Promise<{ detail: string }> {
+  const { data } = await api.post('/auth/password-reset/confirm/', { email, code, new_password: newPassword });
   return data;
 }
 
@@ -94,6 +115,36 @@ export async function listPoints(includeExpired = false): Promise<LoyaltyPointsR
     params: includeExpired ? { include_expired: '1' } : {},
   });
   return data.results;
+}
+
+/** Manually add a points block (e.g. a balance printed on last month's slip). */
+export async function createPoints(payload: {
+  store_name: string;
+  label?: string;
+  points: number;
+  expires_at?: string | null;
+}): Promise<LoyaltyPointsRow> {
+  const { data } = await api.post<LoyaltyPointsRow>('/points/', payload);
+  return data;
+}
+
+/** Update an existing points block. */
+export async function updatePoints(
+  pointsId: number,
+  payload: { store_name?: string; label?: string; points?: number; expires_at?: string | null },
+): Promise<LoyaltyPointsRow> {
+  const { data } = await api.patch<LoyaltyPointsRow>(`/points/${pointsId}/`, payload);
+  return data;
+}
+
+/** Delete a points block (e.g. after spending it in-store). */
+export async function deletePoints(pointsId: number): Promise<void> {
+  await api.delete(`/points/${pointsId}/`);
+}
+
+/** Change password (requires the current one). */
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  await api.post('/me/password/', { old_password: oldPassword, new_password: newPassword });
 }
 
 /** Digital receipts: paste the text of an e-receipt (Uber, Bolt, order
@@ -171,9 +222,14 @@ export async function createCategory(payload: { category_name: string; is_essent
 
 export async function listReceipts(
   params: Record<string, string> = {},
-): Promise<Receipt[]> {
-  const { data } = await api.get<Paginated<Receipt>>('/receipts/', { params });
-  return data.results;
+): Promise<{ results: Receipt[]; count: number }> {
+  // `limit` is a client-side page-size hint: strip it from the request and
+  // slice locally so the API stays untouched (it already pages at 25).
+  const { limit, ...rest } = params;
+  const { data } = await api.get<Paginated<Receipt>>('/receipts/', { params: rest });
+  const n = limit ? parseInt(limit, 10) : NaN;
+  const results = Number.isFinite(n) && n > 0 ? data.results.slice(0, n) : data.results;
+  return { results, count: data.count };
 }
 
 /** Authenticated CSV download of every receipt (honours the same filters). */
@@ -259,6 +315,15 @@ export async function downloadMonthlyAuditPdf(year: number, month: number) {
 
 export async function getMonthlyAnalytics() {
   const { data } = await api.get<MonthlyAnalytics[]>('/receipts/monthly_analytics/');
+  return data;
+}
+
+/** Automated "cut X to save Y" suggestions for one month, computed from
+ * the user's own receipts (categories, impulse flags, pacing, stores). */
+export async function getBudgetAdvice(year: number, month: number) {
+  const { data } = await api.get<BudgetAdvice>('/receipts/budget_advice/', {
+    params: { year, month },
+  });
   return data;
 }
 

@@ -33,6 +33,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from .budget_advice import build_budget_advice
 from .models import Receipt, ReceiptItem
 
 
@@ -171,6 +172,40 @@ def build_monthly_audit_pdf(user, year: int, month: int) -> bytes:
         story.append(_fig_to_image(fig, width_cm=10))
     else:
         story.append(Paragraph('No receipts logged this month.', body_style))
+    story.append(Spacer(1, 0.6 * cm))
+
+    # --- 5. Automated budget-adjustment suggestions -----------------------
+    story.append(Paragraph('5. Next-Month Budget Suggestions', heading_style))
+    advice = build_budget_advice(user, year, month)
+    if advice['suggestions']:
+        rows = [['Suggested move', 'Could save']]
+        for s in advice['suggestions']:
+            rows.append([
+                Paragraph(f"<b>{s['title']}</b><br/>{s['detail']}", body_style),
+                f"R{float(s['potential_saving']):.2f}",
+            ])
+        suggestion_table = Table(rows, colWidths=[12 * cm, 3.2 * cm])
+        suggestion_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef7ee')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#dcd6c8')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        story.append(suggestion_table)
+        story.append(Spacer(1, 0.3 * cm))
+        story.append(Paragraph(
+            f"Following every suggestion above could free up about "
+            f"<b>R{float(advice['potential_total_saving']):.2f}</b> next month.",
+            body_style,
+        ))
+    elif total_spent > 0:
+        story.append(Paragraph(
+            'Nothing worth flagging this month — spending is already lean. '
+            'Keep the same habits and the variance stays green.',
+            body_style,
+        ))
+    else:
+        story.append(Paragraph('No receipts logged this month, so there is nothing to suggest yet.', body_style))
 
     doc.build(story)
     return buf.getvalue()

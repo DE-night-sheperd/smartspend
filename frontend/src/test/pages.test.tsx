@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
+import Dashboard from '../pages/Dashboard';
 import Landing from '../pages/Landing';
 import Privacy from '../pages/Privacy';
 import Points from '../pages/Points';
@@ -8,9 +10,10 @@ import Receipts from '../pages/Receipts';
 import Settings from '../pages/Settings';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { tokenStore } from '../api/client';
-import type { User } from '../types';
+import type { BudgetAdvice, MonthBreakdown, User } from '../types';
 
 vi.mock('../api/endpoints');
+vi.mock('../lib/celebrate', () => ({ celebrate: vi.fn() }));
 
 const me: User = {
   user_id: 'u1',
@@ -56,7 +59,7 @@ describe('Privacy', () => {
 describe('Receipts page', () => {
   it('renders the scanner, upload, manual entry and filter toolbar', async () => {
     const { listReceipts, listStores, listCategories } = await import('../api/endpoints');
-    vi.mocked(listReceipts).mockResolvedValue([]);
+    vi.mocked(listReceipts).mockResolvedValue({ results: [], count: 0 });
     vi.mocked(listStores).mockResolvedValue([]);
     vi.mocked(listCategories).mockResolvedValue([]);
 
@@ -114,6 +117,113 @@ describe('Points page', () => {
     expect(
       await screen.findByText(/Scan a Pick n Pay or Clicks slip/),
     ).toBeInTheDocument();
+    expect(screen.getByText('+ Add points')).toBeInTheDocument();
+  });
+});
+
+describe('Dashboard', () => {
+  const breakdown: MonthBreakdown = {
+    year: 2026,
+    month: 9,
+    total_spent: '260.00',
+    impulse_spend: '120.00',
+    essential_spend: '140.00',
+    budget_limit: '1000.00',
+    budget_variance: '740.00',
+    daily_totals: { '2026-09-02': '120.00', '2026-09-09': '70.00' },
+    categories: [{ category_name: 'Snacks & Drinks', is_essential: false, total: '165.00', item_count: 3 }],
+    stores: [{ store_name: 'Checkers', channel_type: 'Physical_Store', total: '260.00', receipt_count: 4 }],
+    channels: { Physical_Store: '260.00' },
+    biggest_purchase: { item_name: 'Coke 2L', line_total: '120.00', store_name: 'Checkers', purchase_date: '2026-09-02' },
+  };
+  const advice: BudgetAdvice = {
+    year: 2026,
+    month: 9,
+    budget_limit: '1000.00',
+    total_spent: '260.00',
+    has_budget: true,
+    suggestions: [
+      {
+        kind: 'impulse',
+        title: 'Skip the impulse buys',
+        detail: '2 impulse purchase(s) cost R120.00 this month.',
+        potential_saving: '120.00',
+      },
+      {
+        kind: 'store_frequency',
+        title: 'Batch your Checkers trips',
+        detail: '4 separate trips to Checkers this month averaged R65.00 each.',
+        potential_saving: '65.00',
+      },
+    ],
+    potential_total_saving: '185.00',
+  };
+
+  function renderDashboard() {
+    tokenStore.setTokens('access', 'refresh');
+    return render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Dashboard />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('shows the Ways to save card with every suggestion and the total', async () => {
+    const { getMonthBreakdown, getBudgetAdvice, getMonthlyAnalytics, listPoints, getGeminiKeyStatus } =
+      await import('../api/endpoints');
+    vi.mocked(getMonthBreakdown).mockResolvedValue(breakdown);
+    vi.mocked(getBudgetAdvice).mockResolvedValue(advice);
+    vi.mocked(getMonthlyAnalytics).mockResolvedValue([]);
+    vi.mocked(listPoints).mockResolvedValue([]);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: true, key_hint: '' });
+
+    renderDashboard();
+
+    expect(await screen.findByText(/Ways to save this month/)).toBeInTheDocument();
+    expect(screen.getByText('Skip the impulse buys')).toBeInTheDocument();
+    expect(screen.getByText('Batch your Checkers trips')).toBeInTheDocument();
+    expect(screen.getByText('+R120.00')).toBeInTheDocument();
+    expect(screen.getByText('+R65.00')).toBeInTheDocument();
+    expect(screen.getByText(/Sticking to every suggestion could free up about/)).toBeInTheDocument();
+    expect(screen.getByText('R185.00')).toBeInTheDocument();
+  });
+
+  it('renders no advice card when the month has nothing to suggest', async () => {
+    const { getMonthBreakdown, getBudgetAdvice, getMonthlyAnalytics, listPoints, getGeminiKeyStatus } =
+      await import('../api/endpoints');
+    vi.mocked(getMonthBreakdown).mockResolvedValue(breakdown);
+    vi.mocked(getBudgetAdvice).mockResolvedValue({ ...advice, suggestions: [], potential_total_saving: '0.00' });
+    vi.mocked(getMonthlyAnalytics).mockResolvedValue([]);
+    vi.mocked(listPoints).mockResolvedValue([]);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: true, key_hint: '' });
+
+    renderDashboard();
+
+    // The card is absent entirely, and the month itself still renders.
+    await screen.findByText('Where it went');
+    expect(screen.queryByText(/Ways to save this month/)).not.toBeInTheDocument();
+  });
+
+  it('collapses and expands the suggestions card on toggle', async () => {
+    const { getMonthBreakdown, getBudgetAdvice, getMonthlyAnalytics, listPoints, getGeminiKeyStatus } =
+      await import('../api/endpoints');
+    vi.mocked(getMonthBreakdown).mockResolvedValue(breakdown);
+    vi.mocked(getBudgetAdvice).mockResolvedValue(advice);
+    vi.mocked(getMonthlyAnalytics).mockResolvedValue([]);
+    vi.mocked(listPoints).mockResolvedValue([]);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: true, key_hint: '' });
+
+    const user = userEvent.setup();
+    renderDashboard();
+
+    const toggle = await screen.findByRole('button', { name: /Ways to save this month/ });
+    expect(screen.getByText('Skip the impulse buys')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.queryByText('Skip the impulse buys')).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByText('Skip the impulse buys')).toBeInTheDocument();
   });
 });
 
