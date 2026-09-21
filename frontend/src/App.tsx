@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import NavBar from './components/NavBar';
+import MascotTour from './components/MascotTour';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import LoginPassword from './pages/LoginPassword';
@@ -90,6 +91,8 @@ export default function App() {
       <AuthProvider>
         <NavBar />
         <AnimatedRoutes />
+        {/* R: greets first-time users with a guided walkthrough. */}
+        <MascotTour />
       </AuthProvider>
     </BrowserRouter>
   );

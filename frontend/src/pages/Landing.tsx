@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { motion, type Variants } from 'framer-motion';
 import StoryScene from '../components/StoryScene';
+import { useAuth } from '../context/AuthContext';
 
 const container: Variants = {
   hidden: {},
@@ -34,6 +35,8 @@ const STEPS = [
 ];
 
 export default function Landing() {
+  // A signed-in visitor should never be pitched signup — hand them the app.
+  const { user, loading, logout } = useAuth();
   return (
     <div className="landing">
       <motion.header
@@ -53,8 +56,20 @@ export default function Landing() {
         <motion.div className="hero-copy" variants={container} initial="hidden" animate="show">
           <motion.h1 variants={rise}>Scan slips, track spending, stay in budget.</motion.h1>
           <motion.div className="hero-actions" variants={rise}>
-            <Link to="/register" className="landing-cta">Create account</Link>
-            <Link to="/login" className="landing-cta ghost">Log in</Link>
+            {loading ? null : user ? (
+              <>
+                <Link to="/dashboard" className="landing-cta">Go to dashboard →</Link>
+                <button type="button" className="landing-cta ghost" onClick={() => logout()}>
+                  Log out
+                </button>
+                <p className="landing-welcome">Welcome back, {user.first_name} — your ledger is as you left it.</p>
+              </>
+            ) : (
+              <>
+                <Link to="/register" className="landing-cta">Create account</Link>
+                <Link to="/login" className="landing-cta ghost">Log in</Link>
+              </>
+            )}
           </motion.div>
         </motion.div>
         <motion.div

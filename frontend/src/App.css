@@ -1575,3 +1575,123 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .advice-list li small { display: block; margin-top: 0.15rem; }
 .advice-saving { color: #1e5c2e; }
 
+
+/* ---------- landing: signed-in hero ---------- */
+.landing-welcome {
+  margin: 0.9rem 0 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 0.95rem;
+  color: #5c6a5f;
+}
+button.landing-cta {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ---------- R: mascot guided tour ---------- */
+.mascot-tour {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.7rem;
+  width: min(94vw, 520px);
+}
+.mascot-avatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  background: #1e5c2e;
+  border: 2px solid #143d1f;
+  box-shadow: 0 6px 14px rgba(20, 61, 31, 0.25);
+  display: grid;
+  place-items: center;
+}
+.mascot-face {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-size: 1.5rem;
+  color: #f6f1de;
+  letter-spacing: 0.02em;
+}
+.mascot-eye {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f6f1de;
+  animation: mascot-blink 4s infinite;
+}
+@keyframes mascot-blink {
+  0%, 88%, 100% { opacity: 1; }
+  92%, 96% { opacity: 0; }
+}
+.mascot-bubble {
+  flex: 1 1 auto;
+  background: #fffdf5;
+  border: 2px solid #143d1f;
+  border-radius: 14px;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 8px 18px rgba(20, 61, 31, 0.18);
+  padding: 0.9rem 1rem 0.75rem;
+}
+.mascot-msg {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #1d2b22;
+}
+.mascot-progress {
+  display: flex;
+  gap: 6px;
+  margin: 0.6rem 0 0.7rem;
+}
+.mascot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dcd3b4;
+  transition: background 0.25s ease;
+}
+.mascot-dot.on { background: #1e5c2e; }
+.mascot-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+.mascot-stepcount {
+  margin-left: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8rem;
+  color: #5c6a5f;
+}
+.mascot-next {
+  border: 0;
+  border-radius: 10px;
+  padding: 0.5rem 1rem;
+  background: #1e5c2e;
+  color: #f6f1de;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(20, 61, 31, 0.25);
+}
+.mascot-next:hover { background: #27743b; }
+
+@media (max-width: 560px) {
+  .mascot-tour { bottom: 14px; width: min(96vw, 520px); }
+  .mascot-avatar { width: 46px; height: 46px; }
+  .mascot-face { font-size: 1.2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot-eye { animation: none; }
+}

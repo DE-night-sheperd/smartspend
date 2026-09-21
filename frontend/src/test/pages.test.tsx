@@ -1,9 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { getMe } from '../api/endpoints';
 import Dashboard from '../pages/Dashboard';
 import Landing from '../pages/Landing';
+import MascotTour, { isTourDone, markTourDone } from '../components/MascotTour';
 import Login from '../pages/Login';
 import Privacy from '../pages/Privacy';
 import Points from '../pages/Points';
@@ -32,16 +34,36 @@ function daysFromNow(days: number): string {
 }
 
 describe('Landing', () => {
-  it('shows the app entrance with create-account and login CTAs', () => {
+  it('shows the app entrance with create-account and login CTAs for signed-out visitors', async () => {
     render(
       <MemoryRouter>
-        <Landing />
+        <AuthProvider>
+          <Landing />
+        </AuthProvider>
       </MemoryRouter>,
     );
-    expect(screen.getByRole('link', { name: 'Create account' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Create account' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Log in' })).toBeInTheDocument();
     expect(screen.getByText('Scan slips, track spending, stay in budget.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Privacy' })).toBeInTheDocument();
+  });
+
+  it('never pitches signup to a signed-in user — it hands them the dashboard instead', async () => {
+    vi.mocked(getMe).mockResolvedValue(me);
+    tokenStore.setTokens('access', 'refresh');
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Landing />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('link', { name: 'Go to dashboard →' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+    expect(screen.getByText(/Welcome back, Sipho/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Create account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Log in' })).not.toBeInTheDocument();
+    tokenStore.clear();
   });
 });
 
@@ -291,6 +313,73 @@ describe('Login OTP flow', () => {
     renderLogin('?email=new%40example.com');
     const emailInput = await screen.findByLabelText('Email');
     expect(emailInput).toHaveValue('new@example.com');
+  });
+});
+
+describe('MascotTour', () => {
+  const TOUR_KEY = 'smartspend_tour_done_u1';
+
+  function renderTour() {
+    return render(
+      <MemoryRouter>
+        <AuthProvider>
+          <MascotTour />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('greets a first-time user as R: and walks all four steps, then flags itself done', async () => {
+    vi.mocked(getMe).mockResolvedValue(me);
+    tokenStore.setTokens('access', 'refresh');
+    const user = userEvent.setup();
+    renderTour();
+
+    const dialog = await screen.findByRole('dialog', {}, { timeout: 2500 });
+    expect(dialog).toHaveTextContent("Hi, I'm R:");
+    expect(screen.getByText('1 / 4')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('2 / 4')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('3 / 4')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('4 / 4')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Let's go/ }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(localStorage.getItem(TOUR_KEY)).toBe('1');
+    tokenStore.clear();
+  });
+
+  it('never nags a user who already saw it', async () => {
+    vi.mocked(getMe).mockResolvedValue(me);
+    tokenStore.setTokens('access', 'refresh');
+    markTourDone('u1');
+    expect(isTourDone('u1')).toBe(true);
+    renderTour();
+
+    // Wait past the 900ms auto-open window — nothing may appear.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    tokenStore.clear();
+  });
+
+  it('supports skipping, which also marks the tour done', async () => {
+    vi.mocked(getMe).mockResolvedValue(me);
+    tokenStore.setTokens('access', 'refresh');
+    const user = userEvent.setup();
+    renderTour();
+
+    await screen.findByRole('dialog', {}, { timeout: 2500 });
+    await user.click(screen.getByRole('button', { name: 'Skip tour' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(localStorage.getItem(TOUR_KEY)).toBe('1');
+    tokenStore.clear();
   });
 });
 
