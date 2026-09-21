@@ -18,6 +18,7 @@ from unittest import mock
 
 from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
 from . import reminders as reminders_mod
+from . import emails as emails_mod
 
 User = get_user_model()
 
@@ -33,6 +34,7 @@ def auth_client(user):
 # takes the dev/console path and nothing real is ever sent from a test run.
 NO_LIVE_DELIVERY = override_settings(
     RESEND_API_KEY='',
+    BREVO_API_KEY='',
     TELNYX_API_KEY='',
     TELNYX_FROM='SmartSpend',
 )
@@ -1044,7 +1046,10 @@ class CronDailyEndpointTest(TestCase):
 
         with override_settings(
             EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
-            RESEND_API_KEY='',  # force the console/locmem path; Resend test-mode rejects other recipients
+            # Force the console/locmem path — no live provider may intercept:
+            # Resend test-mode rejects other recipients and Brevo would really send.
+            RESEND_API_KEY='',
+            BREVO_API_KEY='',
         ):
             from django.core import mail
 
@@ -1055,3 +1060,53 @@ class CronDailyEndpointTest(TestCase):
             self.assertEqual(reminders_mod.send_points_expiry_reminders(7), 0)
             self.assertEqual(len(mail.outbox), 1)
             self.assertTrue(BudgetAlert.objects.filter(user=self.user, kind='points_7day').exists())
+
+
+class BrevoEmailTransportTest(TestCase):
+    """Brevo is the domain-free email path: a single verified sender address
+    (the developer's own inbox) delivers codes to ANY recipient — no DNS.
+    These tests pin the contract without touching the network."""
+
+    def _codes(self):
+        """Ensure no live provider leaks into these tests."""
+        return {
+            'RESEND_API_KEY': '',
+            'BREVO_API_KEY': 'xkeysib-test-key',
+            'BREVO_FROM_EMAIL': 'me@gmail.com',
+            'BREVO_FROM_NAME': 'SmartSpend',
+        }
+
+    def test_brevo_delivers_login_code_and_reports_transport(self):
+        with mock.patch.object(emails_mod, 'requests') as m_requests:
+            m_requests.post.return_value = mock.Mock(status_code=200)
+            with override_settings(**self._codes()):
+                transport = emails_mod.send_login_code_email('anyone@gmail.com', '424242')
+        self.assertEqual(transport, 'brevo')
+        args, kwargs = m_requests.post.call_args
+        self.assertEqual(args[0], emails_mod.BREVO_ENDPOINT)
+        payload = kwargs['json']
+        self.assertEqual(payload['sender'], {'name': 'SmartSpend', 'email': 'me@gmail.com'})
+        self.assertEqual(payload['to'], [{'email': 'anyone@gmail.com'}])
+        self.assertIn('424242', payload['textContent'])
+
+    def test_brevo_rejection_maps_to_hint(self):
+        with mock.patch.object(emails_mod, 'requests') as m_requests:
+            m_requests.post.return_value = mock.Mock(
+                status_code=400,
+                json=lambda: {'code': 'invalid_parameter', 'message': 'sender not verified'},
+                text='sender not verified',
+            )
+            with override_settings(**self._codes()):
+                with self.assertRaises(emails_mod.EmailDeliveryError) as ctx:
+                    emails_mod.send_login_code_email('anyone@gmail.com', '424242')
+        self.assertIn('sender', ctx.exception.hint.lower())
+
+    def test_resend_takes_precedence_over_brevo(self):
+        with mock.patch.object(emails_mod, 'requests') as m_requests:
+            m_requests.post.return_value = mock.Mock(status_code=200)
+            codes = {**self._codes(), 'RESEND_API_KEY': 're_test', 'RESEND_FROM': 'SmartSpend <onboarding@resend.dev>'}
+            with override_settings(**codes):
+                transport = emails_mod.send_login_code_email('anyone@gmail.com', '424242')
+        self.assertEqual(transport, 'resend')
+        args, _ = m_requests.post.call_args
+        self.assertEqual(args[0], emails_mod.RESEND_ENDPOINT)

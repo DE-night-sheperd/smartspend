@@ -1,14 +1,23 @@
 """Email delivery for login codes.
 
 Preferred transport: Resend (https://resend.com) HTTP API — a single
-RESEND_API_KEY env var and no SDK dependency. Falls back to Django's
-console email backend (dev) when the key is missing, and to SMTP via
-Django's regular EMAIL_* settings when configured.
+RESEND_API_KEY env var and no SDK dependency. Brevo (https://brevo.com)
+is the domain-free alternative: it verifies a single sender email
+address (e.g. your own Gmail) with a confirmation link, so codes reach
+ANY recipient without owning a domain. Falls back to Django's console
+email backend (dev) when no key is set, and to SMTP via Django's
+regular EMAIL_* settings when configured.
 
 Env vars:
   RESEND_API_KEY   — Resend API key (re_...)
   RESEND_FROM      — From address, e.g. "SmartSpend <login@yourdomain.com>"
                      (defaults to Resend's dev onboarding address)
+  BREVO_API_KEY    — Brevo API key (xkeysib-...)
+  BREVO_FROM_EMAIL — Sender address verified in the Brevo dashboard
+  BREVO_FROM_NAME  — Sender display name (default "SmartSpend")
+
+Precedence when multiple keys are set: Resend first, then Brevo, then
+the console backend.
 """
 from __future__ import annotations
 
@@ -20,6 +29,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 RESEND_ENDPOINT = 'https://api.resend.com/emails'
+BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email'
 
 
 class EmailDeliveryError(RuntimeError):
@@ -53,15 +63,42 @@ def _resend_failure(resp) -> EmailDeliveryError:
         hint = (
             'Email delivery is not fully set up: the sending domain is not verified, '
             'so codes can only reach Resend test inboxes (delivered@resend.dev). '
-            'Verify a domain in the Resend dashboard (Domains) to deliver to everyone.'
+            'Verify a domain in the Resend dashboard (Domains), or switch to Brevo '
+            '(BREVO_API_KEY + a verified sender email — no domain needed).'
         )
     return EmailDeliveryError(f'Resend rejected the email: HTTP {resp.status_code} {detail}', hint)
 
 
+def _brevo_failure(resp) -> EmailDeliveryError:
+    """Turn a Brevo error response into an EmailDeliveryError, with hints
+    for the known setup gotchas: rejected/invalid API key and an
+    unverified sender address. Brevo errors arrive as
+    {"code": "...", "message": "..."}."""
+    try:
+        body = resp.json()
+        detail = str(body.get('message', '')) or resp.text[:200]
+        code = str(body.get('code', ''))
+    except Exception:  # noqa: BLE001 — any body shape beats no message
+        detail = resp.text[:200]
+        code = ''
+    lowered = detail.lower()
+    hint = ''
+    if resp.status_code in (401, 403) or code == 'unauthorized':
+        hint = 'The Brevo API key was rejected. Check BREVO_API_KEY in Settings → Environment.'
+    elif resp.status_code in (400, 404, 407) or 'sender' in lowered:
+        hint = (
+            'Brevo refused the sender address. Add your own email as a sender in the '
+            'Brevo dashboard (Senders) and click the confirmation link they email '
+            'you — no domain required.'
+        )
+    return EmailDeliveryError(f'Brevo rejected the email: HTTP {resp.status_code} {detail}', hint)
+
+
 def _deliver(to_email: str, subject: str, text: str, html: str) -> str:
-    """Send one email through Resend when configured, else the console.
-    Returns 'resend' or 'console'. Raises on hard failures so callers can
-    return a clean 502 instead of pretending the mail was sent."""
+    """Send one email through the first configured provider (Resend, then
+    Brevo, else the console). Returns the transport name ('resend',
+    'brevo' or 'console'). Raises on hard failures so callers can return
+    a clean 502 instead of pretending the mail was sent."""
     api_key = getattr(settings, 'RESEND_API_KEY', '')
     if api_key:
         resp = requests.post(
@@ -83,6 +120,31 @@ def _deliver(to_email: str, subject: str, text: str, html: str) -> str:
             raise _resend_failure(resp)
         return 'resend'
 
+    brevo_key = getattr(settings, 'BREVO_API_KEY', '')
+    if brevo_key:
+        resp = requests.post(
+            BREVO_ENDPOINT,
+            headers={
+                'api-key': brevo_key,
+                'Content-Type': 'application/json',
+                'accept': 'application/json',
+            },
+            json={
+                'sender': {
+                    'name': getattr(settings, 'BREVO_FROM_NAME', 'SmartSpend'),
+                    'email': getattr(settings, 'BREVO_FROM_EMAIL', ''),
+                },
+                'to': [{'email': to_email}],
+                'subject': subject,
+                'textContent': text,
+                'htmlContent': html,
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            raise _brevo_failure(resp)
+        return 'brevo'
+
     # Dev fallback: print to the runserver console so local flows are testable.
     from django.core.mail import send_mail
     send_mail(subject, text, settings.RESEND_FROM, [to_email], html_message=html, fail_silently=False)
@@ -90,8 +152,7 @@ def _deliver(to_email: str, subject: str, text: str, html: str) -> str:
 
 
 def send_login_code_email(to_email: str, code: str) -> str:
-    """Send a 6-digit login code. Returns 'resend' or 'console' (which
-    transport was used)."""
+    """Send a 6-digit login code. Returns which transport was used."""
     subject = 'Your SmartSpend login code'
     text = (
         f'Your SmartSpend login code is {code}.\n\n'
@@ -133,7 +194,7 @@ def send_loyalty_expiry_email(to_email: str, rows: list[dict]) -> str:
     """Warn a user that loyalty points are about to expire.
 
     rows: [{store_name, label, points, expires_at, days_left}]. Returns
-    'resend' or 'console' like the login-code sender.
+    the transport used, like the login-code sender.
     """
     lines = [
         f"- {row['points']} {row['label']} at {row['store_name']}"
@@ -157,28 +218,4 @@ def send_loyalty_expiry_email(to_email: str, rows: list[dict]) -> str:
   <ul>{html_rows}</ul>
   <p style="color:#5c6a5f;">Open SmartSpend &rarr; Points to see everything you can still use.</p>
 </div>"""
-
-    api_key = getattr(settings, 'RESEND_API_KEY', '')
-    if api_key:
-        resp = requests.post(
-            RESEND_ENDPOINT,
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json',
-            },
-            json={
-                'from': settings.RESEND_FROM,
-                'to': [to_email],
-                'subject': subject,
-                'text': text,
-                'html': html,
-            },
-            timeout=10,
-        )
-        if resp.status_code >= 400:
-            raise _resend_failure(resp)
-        return 'resend'
-
-    from django.core.mail import send_mail
-    send_mail(subject, text, settings.RESEND_FROM, [to_email], html_message=html, fail_silently=False)
-    return 'console'
+    return _deliver(to_email, subject, text, html)

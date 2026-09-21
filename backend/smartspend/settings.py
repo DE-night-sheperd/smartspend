@@ -182,6 +182,14 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 RESEND_FROM = os.environ.get('RESEND_FROM', 'SmartSpend <onboarding@resend.dev>')
 DEFAULT_FROM_EMAIL = RESEND_FROM
 
+# Brevo (formerly Sendinblue) — the domain-free path: verify ONE sender
+# email address (e.g. your own Gmail) with a confirmation link, no DNS.
+# With BREVO_API_KEY set, codes deliver to any recipient. Used when Resend
+# is not configured.
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+BREVO_FROM_EMAIL = os.environ.get('BREVO_FROM_EMAIL', '')
+BREVO_FROM_NAME = os.environ.get('BREVO_FROM_NAME', 'SmartSpend')
+
 # Shared secret for the automated-reminders cron endpoint (POST /api/cron/daily/,
 # header X-Cron-Key). Left empty, the endpoint refuses to run (503).
 CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY', '')
