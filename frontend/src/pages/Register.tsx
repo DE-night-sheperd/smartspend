@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { register } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { playSound } from '../lib/sounds';
 
 export default function Register() {
   const { login } = useAuth();
@@ -29,8 +30,10 @@ export default function Register() {
     try {
       await register(form);
       await login(form.email, form.password);
+      playSound('success');
       navigate(returnTo, { replace: true });
     } catch (err: unknown) {
+      playSound('error');
       const status = (err as { response?: { status?: number } })?.response?.status;
       const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
       const detail = data?.detail;

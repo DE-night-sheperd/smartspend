@@ -12,6 +12,7 @@ import {
   verifyPasswordResetCode,
 } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { playSound } from '../lib/sounds';
 
 type Step = 'input' | 'code';
 type Channel = 'email' | 'sms' | 'whatsapp';
@@ -63,7 +64,9 @@ function ForgotPassword() {
       await requestPasswordReset(email);
       setStage('code');
       setResendIn(RESEND_SECONDS);
+      playSound('beep');
     } catch (err: unknown) {
+      playSound('error');
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(detail ?? 'Could not send a reset code. Check the address and try again.');
     } finally {
@@ -77,7 +80,9 @@ function ForgotPassword() {
     try {
       await verifyPasswordResetCode(email, code);
       setStage('newPassword');
+      playSound('success');
     } catch (err: unknown) {
+      playSound('error');
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(detail ?? 'That code did not work. Request a new one if it expired.');
     } finally {
@@ -95,8 +100,10 @@ function ForgotPassword() {
     setBusy(true);
     try {
       await confirmPasswordReset(email, code, password);
+      playSound('success');
       setDone(true);
     } catch (err: unknown) {
+      playSound('error');
       const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
       const messages = data
         ? Object.entries(data).flatMap(([, v]) => (Array.isArray(v) ? v.map(String) : [String(v)]))
@@ -276,7 +283,9 @@ export default function Login() {
       setDevCode(result.dev_code ?? null);
       setStep('code');
       setResendIn(RESEND_SECONDS);
+      playSound('beep');
     } catch (err: unknown) {
+      playSound('error');
       const status = (err as { response?: { status?: number } })?.response?.status;
       const detail =
         (err as { response?: { data?: { detail?: string; phone?: string[]; email?: string[] } } })?.response?.data;
@@ -305,9 +314,11 @@ export default function Login() {
     setBusy(true);
     try {
       const created = await loginWithCode(channel, destination, code);
+      playSound('success');
       // Brand-new accounts go straight to Settings to set their budget.
       navigate(created ? '/settings' : returnTo, { replace: true });
     } catch (err: unknown) {
+      playSound('error');
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         'That code did not work. Request a new one if it expired.';
@@ -341,6 +352,7 @@ export default function Login() {
         ? `${response.user.name.firstName ?? ''} ${response.user.name.lastName ?? ''}`.trim()
         : undefined;
       const created = await appleSignIn(response.authorization.id_token, appleName || undefined);
+      playSound('success');
       navigate(created ? '/settings' : returnTo, { replace: true });
     } catch (err: unknown) {
       // Closing the popup is the user changing their mind, not an error.
@@ -348,6 +360,7 @@ export default function Login() {
         setBusy(false);
         return;
       }
+      playSound('error');
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         (err as { message?: string })?.message ??

@@ -9,6 +9,7 @@ import {
   updateMe,
 } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { playSound } from '../lib/sounds';
 import type { GeminiKeyStatus, User } from '../types';
 
 export default function Settings() {
@@ -54,7 +55,9 @@ export default function Settings() {
       setGemini({ connected: true, key_hint: result.key_hint });
       setGeminiKeyInput('');
       setGeminiMessage(result.detail);
+      playSound('success');
     } catch (err: unknown) {
+      playSound('error');
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setGeminiError(typeof detail === 'string' ? detail : 'Could not connect that key. Try again.');
     } finally {
@@ -89,7 +92,9 @@ export default function Settings() {
       await changePassword(pwForm.old_password, pwForm.new_password);
       setPwForm({ old_password: '', new_password: '', confirm: '' });
       setPwStatus('saved');
+      playSound('success');
     } catch (err: unknown) {
+      playSound('error');
       const detail = (err as { response?: { data?: { old_password?: string[]; new_password?: string[] } } })
         ?.response?.data;
       const msg = detail?.old_password?.[0] ?? detail?.new_password?.[0];
@@ -119,7 +124,9 @@ export default function Settings() {
       await updateMe(payload);
       await refreshUser();
       setStatus('saved');
+      playSound('success');
     } catch {
+      playSound('error');
       setError('Could not save your settings. Check the values and try again.');
       setStatus('idle');
     }
