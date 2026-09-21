@@ -4,10 +4,9 @@
  * filtered-noise burst where it earns its keep), so the bundle stays
  * text-only and nothing blocks the first paint.
  *
- * Sounds are opt-out: a 🔊/🔇 toggle in the navbar persists to
- * localStorage, and every entry point checks it first. Playback failures
- * (no AudioContext, autoplay policy, jsdom tests) are swallowed — audio
- * is garnish, never worth an error.
+ * Sounds are always on by design — there is no mute option. Playback
+ * failures (no AudioContext, autoplay policy, jsdom tests) are swallowed:
+ * audio is garnish, never worth an error.
  */
 
 export type SoundName =
@@ -17,8 +16,6 @@ export type SoundName =
   | 'error'    // two descending tones — something failed
   | 'pop'      // soft blip — downloads, small confirmations
   | 'swipe';   // paper torn off — deletes
-
-const MUTE_KEY = 'smartspend:sound-muted';
 
 let ctx: AudioContext | null = null;
 
@@ -34,23 +31,6 @@ function getCtx(): AudioContext | null {
     return ctx;
   } catch {
     return null;
-  }
-}
-
-export function isSoundMuted(): boolean {
-  try {
-    return localStorage.getItem(MUTE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function setSoundMuted(muted: boolean): void {
-  try {
-    if (muted) localStorage.setItem(MUTE_KEY, '1');
-    else localStorage.removeItem(MUTE_KEY);
-  } catch {
-    /* private mode etc. — the toggle still works for this session */
   }
 }
 
@@ -114,9 +94,8 @@ function playNoise(ac: AudioContext, { at = 0, dur, freq, gain = 0.05 }: { at?: 
   src.stop(t0 + dur + 0.02);
 }
 
-/** Fire a named sound. Safe to call anywhere: muted → no-op, failures → silent. */
+/** Fire a named sound. Safe to call anywhere: failures are silent. */
 export function playSound(name: SoundName): void {
-  if (isSoundMuted()) return;
   const ac = getCtx();
   if (!ac) return;
 

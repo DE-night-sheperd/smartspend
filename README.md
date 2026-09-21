@@ -134,8 +134,8 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
   till theme: a cash-register cha-ching when confetti flies, a scanner beep
   when a slip or pasted e-receipt is read, ascending tones on sign-in and
   saved settings, a paper-tear swish on deletes, and a soft pop for PDF
-  downloads. A 🔊/🔇 navbar toggle persists the mute choice to localStorage,
-  and every sound degrades to a silent no-op where WebAudio is unavailable.
+  downloads. Sounds are always on by design — there is no mute option — and
+  every sound degrades to a silent no-op where WebAudio is unavailable.
 - **Animated public landing page at `/`** — a looping cartoon story in the
   hero: a character walks into the corner store, grabs a basket, shops the
   shelves, pays at the till, walks out, scans the paper slip with their
