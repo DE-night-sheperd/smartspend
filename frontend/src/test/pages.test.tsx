@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { getMe } from '../api/endpoints';
 import Dashboard from '../pages/Dashboard';
+import GuestRoute from '../components/GuestRoute';
 import Landing from '../pages/Landing';
 import MascotTour, { isTourDone, markTourDone } from '../components/MascotTour';
 import Login from '../pages/Login';
@@ -380,6 +381,38 @@ describe('MascotTour', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(localStorage.getItem(TOUR_KEY)).toBe('1');
     tokenStore.clear();
+  });
+});
+
+describe('GuestRoute', () => {
+  function renderGuestPage(initialPath: string) {
+    return render(
+      <MemoryRouter initialEntries={[initialPath]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<GuestRoute><div>auth form</div></GuestRoute>} />
+            <Route path="/dashboard" element={<div>the dashboard</div>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('bounces a signed-in user from a public auth page straight to the dashboard', async () => {
+    vi.mocked(getMe).mockResolvedValue(me);
+    tokenStore.setTokens('access', 'refresh');
+    renderGuestPage('/login');
+
+    expect(await screen.findByText('the dashboard')).toBeInTheDocument();
+    expect(screen.queryByText('auth form')).not.toBeInTheDocument();
+    tokenStore.clear();
+  });
+
+  it('renders the auth page for signed-out visitors', async () => {
+    renderGuestPage('/login');
+
+    expect(await screen.findByText('auth form')).toBeInTheDocument();
+    expect(screen.queryByText('the dashboard')).not.toBeInTheDocument();
   });
 });
 
