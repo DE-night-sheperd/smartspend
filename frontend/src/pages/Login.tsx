@@ -12,6 +12,7 @@ import {
   verifyPasswordResetCode,
 } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { warmUpApi } from '../api/client';
 import { playSound } from '../lib/sounds';
 
 type Step = 'input' | 'code';
@@ -57,18 +58,23 @@ function ForgotPassword() {
     return () => clearInterval(timer);
   }, [resendIn > 0]);
 
+  /** Same optimistic pattern as the login code: the code screen opens
+   * immediately, the request rides along, and a failure resolves inline
+   * (stage snaps back so the address can be fixed and resent instantly). */
   async function requestReset() {
+    warmUpApi(); // launch the waker with the click
     setError(null);
     setBusy(true);
+    setStage('code');
     try {
       await requestPasswordReset(email);
-      setStage('code');
       setResendIn(RESEND_SECONDS);
       playSound('beep');
     } catch (err: unknown) {
       playSound('error');
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(detail ?? 'Could not send a reset code. Check the address and try again.');
+      setStage('email');
     } finally {
       setBusy(false);
     }
@@ -167,9 +173,16 @@ function ForgotPassword() {
         )}
         {stage === 'code' && (
           <>
-            <p className="auth-lede">
-              Enter the 6-digit code we sent to <strong>{email}</strong>. It expires in 10 minutes.
-            </p>
+            {busy && !resendIn ? (
+              <p className="auth-lede delivering-note" aria-live="polite">
+                <span className="delivering-spinner" aria-hidden="true" /> Delivering your reset code to{' '}
+                <strong>{email}</strong> — hang tight, this can take a few seconds…
+              </p>
+            ) : (
+              <p className="auth-lede">
+                Enter the 6-digit code we sent to <strong>{email}</strong>. It expires in 10 minutes.
+              </p>
+            )}
             <label>
               Reset code
               <input
@@ -181,12 +194,13 @@ function ForgotPassword() {
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                 placeholder="······"
+                autoFocus
                 required
               />
             </label>
             {error && <p className="form-error">{error}</p>}
             <button type="submit" disabled={busy || code.length !== 6}>
-              {busy ? 'Checking…' : 'Verify code'}
+              {busy && code.length === 6 ? 'Checking…' : 'Verify code'}
             </button>
             <p className="auth-switch">
               Didn't get it?{' '}
@@ -237,7 +251,9 @@ export default function Login() {
   const [mode, setMode] = useState<Mode>('login');
   const [channel, setChannel] = useState<Channel>('email');
   const [step, setStep] = useState<Step>('input');
-  const [email, setEmail] = useState('');
+  // Signup hands over the address it just registered so the user never
+  // retypes it — one tap on "Email me a login code" and they're in.
+  const [email, setEmail] = useState(() => searchParams.get('email') ?? '');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -259,6 +275,9 @@ export default function Login() {
 
   const destination = channel === 'email' ? email : phone;
   useEffect(() => {
+    // The user opened a sign-in page — start waking the server now, so the
+    // send-code request that follows usually lands on an awake API.
+    warmUpApi();
     // The Apple button and SMS/WhatsApp channel tabs only appear when the
     // backend has them configured — an unconfigured option would just fail.
     getAuthConfig()
@@ -270,9 +289,20 @@ export default function Login() {
       .catch(() => setAppleEnabled(false));
   }, []);
 
+  /** Fire the server waker, then open the OTP screen IMMEDIATELY — the user
+   * types their email, hits Enter, and lands on the code input without
+   * waiting for the network. The request rides along: while it's in flight
+   * the OTP screen shows "Delivering your code…", and success flips that to
+   * the countdown. A failure resolves here too — inline error, instant
+   * retry button, no bouncing back to the email form. The wake ping inside
+   * this handler is the second half of the fix: the button itself launches
+   * the server waker, so even a suspended server starts waking the moment
+   * the user commits to logging in. */
   async function sendCode() {
+    warmUpApi(); // launch the waker — this click IS the wake trigger
     setError(null);
     setBusy(true);
+    setStep('code'); // open the OTP holder optimistically, right now
     try {
       const result =
         channel === 'email'
@@ -281,7 +311,6 @@ export default function Login() {
             ? await requestSmsCode(phone)
             : await requestWhatsappCode(phone);
       setDevCode(result.dev_code ?? null);
-      setStep('code');
       setResendIn(RESEND_SECONDS);
       playSound('beep');
     } catch (err: unknown) {
@@ -483,9 +512,16 @@ export default function Login() {
         ) : (
           <form className="auth-card" onSubmit={handleVerify}>
             <h1>Check your {channelNoun}</h1>
-            <p className="auth-lede">
-              We sent a 6-digit code to <strong>{destination}</strong>. It expires in 10 minutes.
-            </p>
+            {busy && !resendIn ? (
+              <p className="auth-lede delivering-note" aria-live="polite">
+                <span className="delivering-spinner" aria-hidden="true" /> Delivering your code to{' '}
+                <strong>{destination}</strong> — hang tight, this can take a few seconds…
+              </p>
+            ) : (
+              <p className="auth-lede">
+                We sent a 6-digit code to <strong>{destination}</strong>. It expires in 10 minutes.
+              </p>
+            )}
 
             <label>
               Login code
@@ -498,6 +534,7 @@ export default function Login() {
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                 placeholder="······"
+                autoFocus
                 required
               />
             </label>
@@ -505,7 +542,7 @@ export default function Login() {
             {error && <p className="form-error">{error}</p>}
 
             <button type="submit" disabled={busy || code.length !== 6}>
-              {busy ? 'Verifying…' : 'Verify & log in'}
+              {busy && code.length === 6 ? 'Verifying…' : 'Verify & log in'}
             </button>
 
             {devCode && (

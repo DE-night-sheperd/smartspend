@@ -307,6 +307,24 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   font-weight: 600;
 }
 
+/* OTP "delivering your code" state — the spinner note that fills the time
+   between tapping Send and the request resolving (cold server absorbed). */
+.delivering-note {
+  display: flex; align-items: center; gap: 0.5rem;
+  text-align: left;
+}
+.delivering-spinner {
+  flex: none;
+  width: 0.9rem; height: 0.9rem;
+  border: 2px solid var(--line);
+  border-top-color: var(--indigo);
+  border-radius: 50%;
+  animation: delivering-spin 0.9s linear infinite;
+}
+@keyframes delivering-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ---------- email / sms channel toggle ---------- */
 .channel-toggle {
   display: grid;
