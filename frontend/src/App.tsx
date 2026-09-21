@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import GuestRoute from './components/GuestRoute';
 import NavBar from './components/NavBar';
 import MascotTour from './components/MascotTour';
 import Landing from './pages/Landing';
@@ -27,10 +28,12 @@ function AnimatedRoutes() {
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
         {/* ---------------- public ---------------- */}
-        <Route path="/" element={<PageFade><Landing /></PageFade>} />
-        <Route path="/login" element={<PageFade><Login /></PageFade>} />
-        <Route path="/login-password" element={<PageFade><LoginPassword /></PageFade>} />
-        <Route path="/register" element={<PageFade><Register /></PageFade>} />
+        {/* Signed-in users are bounced to the dashboard — auth CTAs never
+            render for someone who is already logged in. Privacy stays open. */}
+        <Route path="/" element={<PageFade><GuestRoute><Landing /></GuestRoute></PageFade>} />
+        <Route path="/login" element={<PageFade><GuestRoute><Login /></GuestRoute></PageFade>} />
+        <Route path="/login-password" element={<PageFade><GuestRoute><LoginPassword /></GuestRoute></PageFade>} />
+        <Route path="/register" element={<PageFade><GuestRoute><Register /></GuestRoute></PageFade>} />
         <Route path="/privacy" element={<PageFade><Privacy /></PageFade>} />
 
         {/* ---------------- authenticated app ---------------- */}
