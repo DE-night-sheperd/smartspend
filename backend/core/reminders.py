@@ -82,8 +82,10 @@ def send_points_expiry_reminders(days_left: int) -> int:
 
 
 def send_budget_alerts() -> int:
-    """Email users who crossed 80% of their monthly budget, and those who
-    went over. Each threshold fires at most once per user per month."""
+    """Email users at each budget milestone: 50% spent, 80% spent, and
+    budget depleted (>=100%). Each threshold fires at most once per user
+    per month, and a user gets every threshold they cross (50% today,
+    80% next week, over-budget at month end)."""
     today = timezone.now().date()
     month_start = today.replace(day=1)
     period = month_start.strftime('%Y-%m')
@@ -100,23 +102,36 @@ def send_budget_alerts() -> int:
         budget = user.monthly_budget_limit
         ratio = float(spent) / float(budget)
 
-        kind = ''
-        subject = ''
-        body = ''
-        if ratio >= 1 and not _already_sent(user.user_id, BudgetAlert.Kind.BUDGET_100, period):
-            kind = BudgetAlert.Kind.BUDGET_100
-            subject = f'SmartSpend: you are over your {period} budget'
-            body = (
+        # Highest crossed threshold first. The first crossed tier decides
+        # this run: fire it if unsent. If it was already sent, stop — a
+        # higher tier having fired permanently suppresses the lower ones
+        # (no noisy backfilled warnings after an over-budget email).
+        thresholds = [
+            (BudgetAlert.Kind.BUDGET_100, ratio >= 1, lambda: (
+                f'SmartSpend: you are over your {period} budget',
                 f'You have spent R{spent:,.2f} of your R{budget:,.2f} budget for {period} '
                 f'— R{float(spent) - float(budget):,.2f} over. Time for a no-spend stretch.'
-            )
-        elif ratio >= 0.8 and not _already_sent(user.user_id, BudgetAlert.Kind.BUDGET_80, period):
-            kind = BudgetAlert.Kind.BUDGET_80
-            subject = f'SmartSpend: 80% of your {period} budget is gone'
-            body = (
+            )),
+            (BudgetAlert.Kind.BUDGET_80, ratio >= 0.8, lambda: (
+                f'SmartSpend: 80% of your {period} budget is gone',
                 f'You have spent R{spent:,.2f} of your R{budget:,.2f} budget for {period}. '
                 f'R{float(budget) - float(spent):,.2f} left for the rest of the month.'
-            )
+            )),
+            (BudgetAlert.Kind.BUDGET_50, ratio >= 0.5, lambda: (
+                f'SmartSpend: halfway — 50% of your {period} budget is spent',
+                f'You have spent R{spent:,.2f} of your R{budget:,.2f} budget for {period} '
+                f'— halfway there, with R{float(budget) - float(spent):,.2f} still to spend.'
+            )),
+        ]
+        kind, subject, body = '', '', ''
+        for candidate, crossed, message in thresholds:
+            if not crossed:
+                continue
+            if _already_sent(user.user_id, candidate, period):
+                break  # this (highest crossed) tier already fired — lower tiers stay silent
+            kind = candidate
+            subject, body = message()
+            break
         if not kind:
             continue
         try:

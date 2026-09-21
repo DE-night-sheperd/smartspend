@@ -182,6 +182,7 @@ class BudgetAlert(models.Model):
     renders from it in the UI."""
 
     class Kind(models.TextChoices):
+        BUDGET_50 = 'budget_50', 'Spent 50% of budget'
         BUDGET_80 = 'budget_80', 'Spent 80% of budget'
         BUDGET_100 = 'budget_100', 'Over budget'
         POINTS_7DAY = 'points_7day', 'Points expire within 7 days'

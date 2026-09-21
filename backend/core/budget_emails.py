@@ -1,17 +1,18 @@
-"""Budget warning emails (80% used / over budget).
+"""Budget warning emails (50% / 80% used / over budget).
 
-Same transport selection as the other senders: Resend when configured,
-Django console backend otherwise. Kept separate from emails.py's login-code
-sender so each notification type stays self-contained.
+Rides the shared provider chain from emails.py (Resend → Brevo → console),
+so budget alerts reach real inboxes through whichever provider is live.
+Kept as its own module so each notification type stays self-contained.
 """
 from __future__ import annotations
 
-from django.conf import settings
+from .emails import _deliver
 
 
 def send_budget_alert_email(to_email: str, subject: str, body: str) -> str:
-    """Send a budget warning. Returns 'resend' or 'console'. Raises on
-    provider failures so the caller can log and retry on the next run."""
+    """Send a budget warning. Returns the transport used ('resend',
+    'brevo' or 'console'). Raises on provider failures so the caller can
+    log and retry on the next run."""
     text = f'{body}\n\n— SmartSpend'
     html = f"""\
 <div style="font-family:ui-monospace,Consolas,monospace;max-width:480px;margin:0 auto;padding:24px 0;">
@@ -19,31 +20,4 @@ def send_budget_alert_email(to_email: str, subject: str, body: str) -> str:
   <p>{body}</p>
   <p style="color:#5c6a5f;">Adjust your budget any time in Settings.</p>
 </div>"""
-
-    api_key = getattr(settings, 'RESEND_API_KEY', '')
-    if api_key:
-        import requests
-
-        resp = requests.post(
-            'https://api.resend.com/emails',
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json',
-            },
-            json={
-                'from': settings.RESEND_FROM,
-                'to': [to_email],
-                'subject': subject,
-                'text': text,
-                'html': html,
-            },
-            timeout=10,
-        )
-        if resp.status_code >= 400:
-            raise RuntimeError(f'Resend rejected the email: HTTP {resp.status_code} {resp.text[:200]}')
-        return 'resend'
-
-    from django.core.mail import send_mail
-
-    send_mail(subject, text, settings.RESEND_FROM, [to_email], html_message=html, fail_silently=False)
-    return 'console'
+    return _deliver(to_email, subject, text, html)

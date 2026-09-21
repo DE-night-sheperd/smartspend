@@ -16,9 +16,10 @@ from rest_framework.test import APIClient
 
 from unittest import mock
 
-from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
+from .models import BudgetAlert, Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
 from . import reminders as reminders_mod
 from . import emails as emails_mod
+from . import budget_emails as budget_emails_mod
 
 User = get_user_model()
 
@@ -1008,6 +1009,96 @@ class LoyaltyPointsCrudTest(TestCase):
             client.delete(f'/api/points/{self.block.points_id}/').status_code,
             status.HTTP_404_NOT_FOUND,
         )
+
+
+class BudgetThresholdAlertTest(TestCase):
+    """Budget milestone emails: 50% spent, 80% spent, and budget depleted —
+    each fires at most once per user per month, and a user who keeps
+    spending collects all three in sequence."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email='thresholds@x.com', password='pass-12345678', monthly_budget_limit='100.00'
+        )
+        store = Store.objects.create(store_name='Spar', channel_type='Physical_Store')
+        self.store = store
+
+    def _receipt(self, amount):
+        Receipt.objects.create(
+            user=self.user, store=self.store,
+            purchase_date=timezone.now().date(),
+            total_amount=Decimal(str(amount)),
+        )
+
+    def _run(self):
+        from django.core import mail
+
+        with override_settings(
+            RESEND_API_KEY='', BREVO_API_KEY='',
+            EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+        ):
+            before = len(mail.outbox)
+            notified = reminders_mod.send_budget_alerts()
+            return notified, list(mail.outbox[before:])
+
+    def test_halfway_threshold_fires_first_email(self):
+        self._receipt(55)
+        notified, outbox = self._run()
+        self.assertEqual(notified, 1)
+        self.assertEqual(len(outbox), 1)
+        self.assertIn('halfway', outbox[0].subject)
+        self.assertIn('50%', outbox[0].subject)
+        self.assertTrue(BudgetAlert.objects.filter(user=self.user, kind='budget_50').exists())
+
+    def test_each_threshold_fires_exactly_once_and_in_sequence(self):
+        # Cross 50%: halfway email.
+        self._receipt(55)
+        notified, outbox = self._run()
+        self.assertEqual((notified, len(outbox)), (1, 1))
+        # Cross 80%: the 80% email — not a repeat of 50%.
+        self._receipt(30)  # now R85 of R100
+        notified, outbox = self._run()
+        self.assertEqual((notified, len(outbox)), (1, 1))
+        self.assertIn('80%', outbox[0].subject)
+        # Over budget: the depletion email.
+        self._receipt(30)  # now R115 of R100
+        notified, outbox = self._run()
+        self.assertEqual((notified, len(outbox)), (1, 1))
+        self.assertIn('over your', outbox[0].subject)
+        # Every later run is silent — one email per threshold, ever.
+        for _ in range(2):
+            notified, outbox = self._run()
+            self.assertEqual((notified, len(outbox)), (0, 0))
+        kinds = list(
+            BudgetAlert.objects.filter(user=self.user).order_by('kind').values_list('kind', flat=True)
+        )
+        self.assertEqual(kinds, ['budget_100', 'budget_50', 'budget_80'])
+
+    def test_skipping_straight_past_80_still_sends_the_100_email(self):
+        # A single big receipt blows the whole budget at once.
+        self._receipt(140)
+        notified, outbox = self._run()
+        self.assertEqual(notified, 1)
+        self.assertIn('over your', outbox[0].subject)
+        # Later runs pick up nothing extra — 50/80 were skipped for good.
+        notified, outbox = self._run()
+        self.assertEqual((notified, len(outbox)), (0, 0))
+
+    def test_budget_alert_email_rides_brevo_provider(self):
+        # The budget-alert sender shares the login-code provider chain:
+        # with only a Brevo key set, it must send through Brevo.
+        with mock.patch.object(emails_mod, 'requests') as m_requests:
+            m_requests.post.return_value = mock.Mock(status_code=200)
+            with override_settings(
+                RESEND_API_KEY='',
+                BREVO_API_KEY='xkeysib-test-key',
+                BREVO_FROM_EMAIL='me@gmail.com',
+            ):
+                transport = budget_emails_mod.send_budget_alert_email('a@b.com', 'Subj', 'Body')
+        self.assertEqual(transport, 'brevo')
+        args, kwargs = m_requests.post.call_args
+        self.assertIn('brevo', args[0])
+        self.assertEqual(kwargs['json']['subject'], 'Subj')
 
 
 class CronDailyEndpointTest(TestCase):
