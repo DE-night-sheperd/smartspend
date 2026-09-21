@@ -15,9 +15,12 @@ frontend (`frontend/`), covering all 5 stages of the pipeline end-to-end.
 - **Passwordless email-code login** (`/api/auth/login-code/` +
   `/api/auth/verify-login-code/`): 6-digit single-use codes with a 10-minute
   TTL, max 5 wrong attempts, per-email rate limiting, and account creation on
-  first login. Codes are delivered through [Resend](https://resend.com) when
-  `RESEND_API_KEY` is set, or printed to the runserver console in dev
-  (the response also carries `dev_code` so the UI can show it).
+  first login. Codes are delivered through the email provider chain —
+  [Resend](https://resend.com) when `RESEND_API_KEY` is set, else
+  [Brevo](https://brevo.com) when `BREVO_API_KEY` is set (the domain-free
+  path: verify one sender address, no DNS), else printed to the runserver
+  console in dev (the response also carries `dev_code` so the UI can show
+  it).
   When a provider refuses the send (e.g. Resend's testing mode with no
   verified domain) the API returns 502 with an actionable hint instead of a
   silent generic failure — so "codes never arrive" always says why.
@@ -210,10 +213,17 @@ bound to `0.0.0.0`).
 
 | Key | What it unlocks |
 | --- | --- |
-| `GEMINI_API_KEY` | Real AI receipt analysis — Gemini vision extracts merchant, date, total, line items, categories and impulse flags straight from the photo. Without it, scans degrade to Tesseract OCR + regex heuristics. |
-| `RESEND_API_KEY` | Login codes are emailed for real. Without it, codes print to the Django runserver console and the API returns `dev_code` so the UI can display it. |
+| `GEMINI_API_KEY` | Real AI receipt analysis — Gemini vision extracts merchant, date, total, line items, categories and impulse flags straight from the photo. Without it, scans degrade to Tesseract OCR + regex heuristics. `GEMINI_MODEL` overrides the model (default `gemini-3.6-flash`). |
+| `BREVO_API_KEY` + `BREVO_FROM_EMAIL` + `BREVO_FROM_NAME` | **The recommended email path — no domain needed.** Verify one sender address (e.g. your own Gmail) in the Brevo dashboard and codes + budget/points emails deliver to any recipient. `BREVO_FROM_NAME` defaults to `SmartSpend`. |
+| `RESEND_API_KEY` + `RESEND_FROM` | Alternative email provider (takes precedence over Brevo when both are set). Note: without a verified domain, Resend's testing mode only delivers to Resend test inboxes — use Brevo if you have no domain. `RESEND_FROM` defaults to Resend's onboarding address. |
+| `CRON_SECRET_KEY` | Shared secret for the automated-reminders endpoint (`POST /api/cron/daily/`, header `X-Cron-Key`) — budget milestone emails (50% / 80% / depleted) and points-expiry warnings. Empty, the endpoint refuses to run (503). |
 | `TELNYX_API_KEY` + `TELNYX_FROM` | SMS login codes are texted for real through Telnyx. Add `TELNYX_WHATSAPP_FROM` (a WhatsApp-enabled sender) to deliver the codes as WhatsApp messages instead. Without keys, the SMS/WhatsApp endpoints return `dev_code` so the flow stays testable. |
-| `APPLE_CLIENT_ID` | Shows the "Continue with Apple" button and lets `/api/auth/apple/` verify Apple identity tokens. Unset, Apple sign-in stays hidden. |
+| `APPLE_CLIENT_ID` | Shows the "Continue with Apple" button and lets `/api/auth/apple/` verify Apple identity tokens. Unset, Apple sign-in stays hidden. The login page also reads `VITE_APPLE_CLIENT_ID` at build time (same value) to wire the Apple JS flow. |
+
+Optional infra vars (see `backend/.env.example`): `DJANGO_SECRET_KEY`,
+`DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and
+`POSTGRES_HOST`/`POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_PORT`
+(leave `POSTGRES_HOST` unset for SQLite in dev).
 
 All features work without keys (dev fallbacks), so the app is fully usable
 out of the box.
@@ -240,12 +250,18 @@ to it (unset, the built app expects the API at same-origin `/api`).
 `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=<your-api-host>`,
 `CORS_ALLOWED_ORIGINS=<your-frontend-origin>`, `POSTGRES_HOST/NAME/USER/
 PASSWORD/PORT` for Postgres (SQLite is dev-only), plus the optional
-`GEMINI_API_KEY` / `RESEND_API_KEY` / `TELNYX_*` / `APPLE_CLIENT_ID` keys —
-users can now connect their own Gemini key in Settings, so the server key
-is only a fallback.
+`GEMINI_API_KEY` / `BREVO_*` / `RESEND_*` / `TELNYX_*` / `APPLE_CLIENT_ID`
+keys — users can now connect their own Gemini key in Settings, so the server
+key is only a fallback.
 
-**Scheduler** — the points-expiry email reminders need a daily cron (or
-platform scheduler) running `python manage.py send_points_reminders`.
+**Scheduler** — the automated emails (budget milestones at 50% / 80% /
+depleted, and points-expiry warnings) ride the daily cron endpoint
+`POST /api/cron/daily/` guarded by `CRON_SECRET_KEY`. This repo ships a
+GitHub Actions workflow (`.github/workflows/reminders.yml`) that calls it
+every day at 07:00 SAST; it needs two repo secrets — `CRON_URL` (the
+deployed endpoint URL) and `CRON_SECRET_KEY`. Any platform scheduler that
+POSTs the same header works identically, as does
+`python manage.py send_points_reminders`.
 
 ## Still worth building next
 - **Mobile client**: the spec calls for Flutter; this repo gives you a web
