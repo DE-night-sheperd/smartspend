@@ -242,7 +242,19 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: 'easeOut' }}
           >
-            <p className="hero-eyebrow">{MONTH_NAMES[cursor.month - 1]} {cursor.year}, so far</p>
+            <div className="hero-eyebrow-row">
+              <p className="hero-eyebrow">{MONTH_NAMES[cursor.month - 1]} {cursor.year}, so far</p>
+              {budget > 0 && (
+                <span className={`hero-pill ${over ? 'over' : 'under'}`}>
+                  {Math.round(pct)}% of budget used
+                </span>
+              )}
+              {isCurrentMonth && (
+                <span className="hero-chip">
+                  {new Date(cursor.year, cursor.month, 0).getDate() - new Date().getDate()} days left
+                </span>
+              )}
+            </div>
             <p className={`hero-figure ${over ? 'over' : 'under'}`}>
               <AnimatedNumber value={spent} prefix="R" />
             </p>
@@ -282,9 +294,9 @@ export default function Dashboard() {
             animate="show"
             variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
           >
-            <StatCard label="Impulse / non-essential" value={impulse} tone={impulse > 0 ? 'warn' : 'good'} />
-            <StatCard label="Budget variance" value={variance} tone={over ? 'bad' : 'good'} signed />
-            <StatCard label="Receipts this month" value={receiptCount(breakdown)} plain />
+            <StatCard label="Impulse / non-essential" value={impulse} tone={impulse > 0 ? 'warn' : 'good'} icon="💸" />
+            <StatCard label="Budget variance" value={variance} tone={over ? 'bad' : 'good'} signed icon="🎯" />
+            <StatCard label="Receipts this month" value={receiptCount(breakdown)} plain icon="🧾" />
           </motion.div>
 
           {/* Charts */}
@@ -299,11 +311,17 @@ export default function Dashboard() {
                 <h2 className="chart-title">Daily spending spikes</h2>
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e3d9b8" />
-                    <XAxis dataKey="day" tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} />
-                    <YAxis tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} />
-                    <Tooltip contentStyle={{ fontFamily: 'IBM Plex Mono', borderRadius: 8 }} />
-                    <Bar dataKey="Spent" fill="#c96f4a" radius={[4, 4, 0, 0]} />
+                    <defs>
+                      <linearGradient id="dailyBarFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#ff9b62" />
+                        <stop offset="100%" stopColor="#c96f4a" />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 6" stroke="#e3d9b8" vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} axisLine={false} tickLine={false} width={44} />
+                    <Tooltip content={<SlipTooltip />} cursor={{ fill: 'rgba(201, 111, 74, 0.08)' }} />
+                    <Bar dataKey="Spent" fill="url(#dailyBarFill)" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </motion.div>
@@ -317,20 +335,23 @@ export default function Dashboard() {
                 transition={{ duration: 0.5, delay: 0.35 }}
               >
                 <h2 className="chart-title">Where it went</h2>
-                <ResponsiveContainer width="100%" height={260}>
-                  <PieChart>
-                    <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
-                      {donutData.map((entry, i) => (
-                        <Cell key={entry.name} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => `R${fmtRand(Number(value))}`}
-                      contentStyle={{ fontFamily: 'IBM Plex Mono', borderRadius: 8 }}
-                    />
-                    <Legend wrapperStyle={{ fontFamily: 'Space Grotesk', fontSize: 12 }} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="donut-wrap">
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={62} outerRadius={92} paddingAngle={3} cornerRadius={6} stroke="none">
+                        {donutData.map((entry, i) => (
+                          <Cell key={entry.name} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<SlipTooltip />} />
+                      <Legend wrapperStyle={{ fontFamily: 'Space Grotesk', fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="donut-center" aria-hidden="true">
+                    <span className="donut-total num-tick">R{fmtRand(spent)}</span>
+                    <span className="donut-caption">spent total</span>
+                  </div>
+                </div>
               </motion.div>
             )}
           </div>
@@ -346,13 +367,23 @@ export default function Dashboard() {
               <h2 className="chart-title">Month-over-month</h2>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={[...chartRows].reverse()}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e3d9b8" />
-                  <XAxis dataKey="month" tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} />
-                  <YAxis tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} />
-                  <Tooltip contentStyle={{ fontFamily: 'IBM Plex Mono', borderRadius: 8 }} />
+                  <defs>
+                    <linearGradient id="trendGrowFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#2bd576" />
+                      <stop offset="100%" stopColor="#178a4d" />
+                    </linearGradient>
+                    <linearGradient id="trendSpendFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ff5a4e" />
+                      <stop offset="100%" stopColor="#c03327" />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 6" stroke="#e3d9b8" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontFamily: 'IBM Plex Mono', fontSize: 12 }} axisLine={false} tickLine={false} width={52} />
+                  <Tooltip content={<SlipTooltip />} cursor={{ fill: 'rgba(22, 35, 28, 0.04)' }} />
                   <Legend wrapperStyle={{ fontFamily: 'Space Grotesk', fontSize: 13 }} />
-                  <Bar dataKey="Total spent" fill="#1fae63" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Impulse spend" fill="#e8483a" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Total spent" fill="url(#trendGrowFill)" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="Impulse spend" fill="url(#trendSpendFill)" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </motion.div>
@@ -480,18 +511,45 @@ function receiptCount(b: MonthBreakdown): number {
   return b.stores.reduce((sum, s) => sum + s.receipt_count, 0);
 }
 
+/** Chart tooltip styled like a mini till slip — shared by every chart. */
+function SlipTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ name?: string; value?: number | string; color?: string; fill?: string; dataKey?: string | number }>;
+  label?: string | number;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="slip-tooltip">
+      {label !== undefined && label !== '' && <p className="slip-tooltip-label">{label}</p>}
+      {payload.map((entry) => (
+        <p key={String(entry.dataKey ?? entry.name)} className="slip-tooltip-row">
+          <span className="slip-tooltip-dot" style={{ background: entry.color || entry.fill }} />
+          {entry.name}:{' '}
+          <strong className="num-tick">R{fmtRand(Number(entry.value))}</strong>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
   tone,
   signed,
   plain,
+  icon,
 }: {
   label: string;
   value: number;
   tone?: 'good' | 'bad' | 'warn';
   signed?: boolean;
   plain?: boolean;
+  icon?: string;
 }) {
   const prefix = plain ? '' : signed && value >= 0 ? '+R' : 'R';
   return (
@@ -499,7 +557,14 @@ function StatCard({
       className={`stat-card ${tone ?? ''}`}
       variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
     >
-      <span className="stat-label">{label}</span>
+      <span className="stat-label">
+        {icon ? (
+          <span className="stat-icon" aria-hidden="true">
+            {icon}
+          </span>
+        ) : null}
+        {label}
+      </span>
       <span className="stat-value">
         {plain ? value : <AnimatedNumber value={value} prefix={prefix} decimals={2} />}
       </span>
