@@ -1839,3 +1839,49 @@ button.landing-cta {
   .thermo-fill::after { animation: none; }
   .stat-card:hover { transform: none; }
 }
+
+/* ---------- settings: sign-in activity (login audit) ---------- */
+.login-audit-summary {
+  margin: 0.2rem 0 0.7rem;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+.login-audit-summary strong {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+.login-audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.login-audit-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.88rem;
+  background: #fffdf5;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+}
+.login-audit-method {
+  font-weight: 700;
+  color: var(--ink);
+}
+.login-audit-when {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+.login-audit-ip {
+  margin-left: auto;
+  color: #5c6a5f;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}

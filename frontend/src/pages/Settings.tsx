@@ -6,11 +6,12 @@ import {
   disconnectGeminiKey,
   exportReceiptsCsv,
   getGeminiKeyStatus,
+  getLoginAudit,
   updateMe,
 } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { playSound } from '../lib/sounds';
-import type { GeminiKeyStatus, User } from '../types';
+import type { GeminiKeyStatus, LoginAuditEntry, User } from '../types';
 
 export default function Settings() {
   const { user, refreshUser } = useAuth();
@@ -36,6 +37,9 @@ export default function Settings() {
   const [pwStatus, setPwStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [pwError, setPwError] = useState<string | null>(null);
 
+  // Sign-in audit trail (login count + recent logins)
+  const [logins, setLogins] = useState<LoginAuditEntry[] | null>(null);
+
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
     setStatus('idle');
@@ -43,6 +47,7 @@ export default function Settings() {
 
   useEffect(() => {
     getGeminiKeyStatus().then(setGemini).catch(() => setGemini({ connected: false, key_hint: '' }));
+    getLoginAudit().then(setLogins).catch(() => setLogins([]));
   }, []);
 
   async function handleGeminiConnect(e: FormEvent) {
@@ -326,6 +331,53 @@ export default function Settings() {
           ⤓ Export receipts (CSV)
         </button>
       </motion.section>
+
+      <motion.section
+        className="settings-card"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
+      >
+        <h2>Sign-in activity</h2>
+        {logins === null ? (
+          <p className="field-hint">Loading…</p>
+        ) : logins.length === 0 ? (
+          <p className="field-hint">No sign-ins recorded yet.</p>
+        ) : (
+          <>
+            <p className="login-audit-summary">
+              <strong>{logins[0].login_count}</strong> total sign-in{logins[0].login_count === 1 ? '' : 's'} ·
+              last {formatLoginDate(logins[0].created_at)}
+            </p>
+            <ul className="login-audit-list">
+              {logins.slice(0, 5).map((entry, i) => (
+                <li key={`${entry.created_at}-${i}`}>
+                  <span className="login-audit-method">{LOGIN_METHOD_LABEL[entry.method]}</span>
+                  <span className="login-audit-when">{formatLoginDate(entry.created_at)}</span>
+                  {entry.ip && <span className="login-audit-ip">from {entry.ip}</span>}
+                </li>
+              ))}
+            </ul>
+            {logins.length > 5 && (
+              <p className="field-hint">…and {logins.length - 5} earlier sign-in{logins.length - 5 === 1 ? '' : 's'}.</p>
+            )}
+          </>
+        )}
+      </motion.section>
     </div>
   );
+}
+
+const LOGIN_METHOD_LABEL: Record<LoginAuditEntry['method'], string> = {
+  password: 'Password',
+  email_code: 'Email code',
+  sms_code: 'SMS code',
+  whatsapp_code: 'WhatsApp code',
+  apple: 'Apple',
+};
+
+function formatLoginDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
 }

@@ -6,6 +6,18 @@ export interface User {
   last_name: string;
   monthly_budget_limit: string;
   created_at: string;
+  login_count?: number;
+  last_login_at?: string | null;
+}
+
+/** One row of the per-user sign-in audit trail (GET /api/me/logins/). */
+export interface LoginAuditEntry {
+  login_count: number;
+  last_login_at: string | null;
+  method: 'password' | 'email_code' | 'sms_code' | 'whatsapp_code' | 'apple';
+  created_at: string;
+  ip: string | null;
+  user_agent: string;
 }
 
 export type ChannelType = 'Physical_Store' | 'Online_Ecommerce';

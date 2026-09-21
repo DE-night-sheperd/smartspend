@@ -13,16 +13,17 @@ from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
-from django.db.models import Q, Sum
+from django.db.models import F, Q, Sum
 from django.db.models.functions import TruncMonth
 
 from .apple_auth import verify_apple_identity_token
 from .budget_advice import build_budget_advice
 from .crypto import mask_secret
 from .emails import send_login_code_email, send_password_reset_email
-from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
+from .models import Category, LoginAudit, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
 from .receipt_ai import analyze_receipt, analyze_receipt_text, verify_gemini_key
 from .reports import build_monthly_audit_pdf
 from .serializers import (
@@ -104,7 +105,6 @@ class RegisterView(generics.CreateAPIView):
 
 class MeView(generics.RetrieveUpdateAPIView):
     """GET/PATCH the logged-in user's own profile (budget limit, name, etc)."""
-
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -338,7 +338,7 @@ class VerifyLoginCodeView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         destination = serializer.validated_data['email']
         code = serializer.validated_data['code']
-        return _verify_and_sign_in(destination, code, self.identity_defaults)
+        return _verify_and_sign_in(destination, code, request, 'email', self.identity_defaults)
 
 
 class RequestSmsCodeView(RequestLoginCodeView):
@@ -389,7 +389,7 @@ class VerifySmsCodeView(VerifyLoginCodeView):
         serializer.is_valid(raise_exception=True)
         destination = serializer.validated_data['phone']
         code = serializer.validated_data['code']
-        return _verify_and_sign_in(destination, code, {'phone': destination})
+        return _verify_and_sign_in(destination, code, request, 'sms', {'phone': destination})
 
 
 class RequestWhatsappCodeView(RequestSmsCodeView):
@@ -439,7 +439,36 @@ class VerifyWhatsappCodeView(VerifySmsCodeView):
         serializer.is_valid(raise_exception=True)
         destination = serializer.validated_data['phone']
         code = serializer.validated_data['code']
-        return _verify_and_sign_in(destination, code, {'phone': destination})
+        return _verify_and_sign_in(destination, code, request, 'whatsapp', {'phone': destination})
+
+
+class MeLoginsView(generics.ListAPIView):
+    """GET /api/me/logins/ — this user's sign-in audit trail (newest
+    first), plus the aggregate counters. Part of the public-ish surface for
+    auditing: the user can see every successful access to their account,
+    with the channel, timestamp and IP."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # audit trail is a plain array, newest first
+
+    class Serializer(serializers.Serializer):
+        """Read-only projection — no write surface anywhere."""
+
+        login_count = serializers.IntegerField(source='user.login_count')
+        last_login_at = serializers.DateTimeField(source='user.last_login_at')
+        method = serializers.CharField()
+        created_at = serializers.DateTimeField()
+        ip = serializers.IPAddressField()
+        user_agent = serializers.CharField()
+
+    serializer_class = Serializer
+
+    def get_queryset(self):
+        return (
+            LoginAudit.objects.filter(user=self.request.user)
+            .select_related('user')
+            .only('method', 'created_at', 'ip', 'user_agent', 'user__login_count', 'user__last_login_at')
+        )
 
 
 class AuthConfigView(generics.GenericAPIView):
@@ -525,6 +554,7 @@ class AppleSignInView(generics.GenericAPIView):
                 user.save()
 
         refresh = TokenObtainPairSerializerForUser.get_token(user)
+        record_login(user, request, LoginAudit.Method.APPLE)
         return Response(
             {
                 'access': str(refresh.access_token),
@@ -550,9 +580,45 @@ class TokenObtainPairSerializerForUser:
         return token
 
 
-def _verify_and_sign_in(destination: str, code: str, identity_defaults: dict | None = None):
-    """Shared verifier for the email and SMS code flows: checks the code,
-    consumes it, creates the account on first login, and mints JWTs."""
+def record_login(user, request, method: LoginAudit.Method) -> None:
+    """Audit a successful sign-in: bump the user's counters and append a
+    LoginAudit row. Called from every path that mints tokens (password,
+    email/SMS/WhatsApp code, Apple) so the trail is complete no matter how
+    the user got in. Never raises — auditing must not block a login."""
+    try:
+        type(user).objects.filter(pk=user.pk).update(
+            login_count=F('login_count') + 1,
+            last_login_at=timezone.now(),
+        )
+        LoginAudit.objects.create(
+            user=user,
+            method=method,
+            ip=request.META.get('REMOTE_ADDR') or None,
+            user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:300],
+        )
+    except Exception:  # noqa: BLE001 — auditing must never block a login
+        pass
+
+
+class PasswordLoginAuditView(TokenObtainPairView):
+    """POST /api/auth/login/ — simplejwt's token pair, plus a login-audit
+    row. Wrapping the view (rather than the serializer) keeps the audit
+    recording at the same layer as the other channels."""
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == 200 and isinstance(response.data, dict) and 'access' in response.data:
+            user = User.objects.filter(email__iexact=str(request.data.get('email') or '')).first()
+            if user is not None:
+                record_login(user, request, LoginAudit.Method.PASSWORD)
+        return response
+
+
+def _verify_and_sign_in(destination: str, code: str, request, channel: str = 'email',
+                        identity_defaults: dict | None = None):
+    """Shared verifier for the email and SMS/WhatsApp code flows: checks
+    the code, consumes it, creates the account on first login, audits the
+    login, and mints JWTs. `channel` picks the audit method."""
     login_code = (
         LoginCode.objects.filter(email=destination, consumed_at__isnull=True)
         .order_by('-created_at')
@@ -585,6 +651,15 @@ def _verify_and_sign_in(destination: str, code: str, identity_defaults: dict | N
             user.save()
 
     refresh = TokenObtainPairSerializerForUser.get_token(user)
+    record_login(
+        user,
+        request,
+        {
+            'email': LoginAudit.Method.EMAIL_CODE,
+            'sms': LoginAudit.Method.SMS_CODE,
+            'whatsapp': LoginAudit.Method.WHATSAPP_CODE,
+        }[channel],
+    )
     return Response(
         {
             'access': str(refresh.access_token),
