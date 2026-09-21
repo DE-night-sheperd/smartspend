@@ -39,15 +39,14 @@ const REFRESH_KEY = 'smartspend_refresh';
 
 /**
  * Fire-and-forget health ping: touching the API starts waking a suspended
- * server. Called once when the app loads so the wake happens while the user
- * is still typing their details. Never throws.
+ * server. Fired when the app loads AND from the auth pages' send buttons,
+ * so the wake launches the moment a user commits to signing in. Never
+ * throws; harmless when the server is already awake.
  */
 export function warmUpApi(): void {
-  if (import.meta.env.PROD) {
-    void axios
-      .get(`${API_BASE_URL}/auth/config/`, { timeout: 45_000 })
-      .catch(() => undefined);
-  }
+  void axios
+    .get(`${API_BASE_URL}/auth/config/`, { timeout: 45_000 })
+    .catch(() => undefined);
 }
 
 export const tokenStore = {

@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import Dashboard from '../pages/Dashboard';
 import Landing from '../pages/Landing';
+import Login from '../pages/Login';
 import Privacy from '../pages/Privacy';
 import Points from '../pages/Points';
 import Receipts from '../pages/Receipts';
@@ -224,6 +225,72 @@ describe('Dashboard', () => {
     expect(screen.queryByText('Skip the impulse buys')).not.toBeInTheDocument();
     await user.click(toggle);
     expect(screen.getByText('Skip the impulse buys')).toBeInTheDocument();
+  });
+});
+
+describe('Login OTP flow', () => {
+  function renderLogin(search = '') {
+    return render(
+      <MemoryRouter initialEntries={[`/login${search}`]}>
+        <AuthProvider>
+          <Login />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('opens the OTP holder immediately on Enter and shows the delivering state while the request is in flight', async () => {
+    const user = userEvent.setup();
+    const { requestLoginCode, getAuthConfig, getGeminiKeyStatus } = await import('../api/endpoints');
+    vi.mocked(getAuthConfig).mockResolvedValue({ apple_enabled: false, sms_enabled: false, whatsapp_enabled: false });
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: true, key_hint: '' });
+    // A slow request — the OTP screen must already be up while it resolves.
+    vi.mocked(requestLoginCode).mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve({ detail: 'ok', transport: 'console', dev_code: '424242' }), 150)),
+    );
+
+    renderLogin();
+    await screen.findByRole('heading', { name: 'Log in to SmartSpend' });
+
+    const emailInput = screen.getByLabelText('Email');
+    await user.type(emailInput, 'sipho@example.com{Enter}');
+
+    // Optimistic switch: OTP holder visible BEFORE the request resolves.
+    expect(screen.getByRole('heading', { name: 'Check your inbox' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Login code')).toBeInTheDocument();
+    expect(screen.getByText(/Delivering your code to/)).toBeInTheDocument();
+
+    // Once the request resolves, the delivering note is replaced by the countdown.
+    await waitFor(() => expect(screen.getByText(/Resend code in/)).toBeInTheDocument());
+    expect(screen.getByText(/We sent a 6-digit code to/)).toBeInTheDocument();
+    expect(requestLoginCode).toHaveBeenCalledWith('sipho@example.com');
+  });
+
+  it('keeps the OTP screen open with an inline retry when sending fails', async () => {
+    const user = userEvent.setup();
+    const { requestLoginCode, getAuthConfig } = await import('../api/endpoints');
+    vi.mocked(getAuthConfig).mockResolvedValue({ apple_enabled: false, sms_enabled: false, whatsapp_enabled: false });
+    vi.mocked(requestLoginCode).mockRejectedValue({ response: { status: 502, data: { detail: 'Could not send the email right now. Please try again.' } } });
+
+    renderLogin();
+    await screen.findByRole('heading', { name: 'Log in to SmartSpend' });
+
+    await user.type(screen.getByLabelText('Email'), 'sipho@example.com{Enter}');
+
+    await waitFor(() => expect(screen.getByText(/Could not send the email right now/)).toBeInTheDocument());
+    // Still on the OTP screen (no bounce back to the email form)…
+    expect(screen.getByLabelText('Login code')).toBeInTheDocument();
+    // …with an instant retry available (no countdown blocking it).
+    expect(screen.getByRole('button', { name: 'Resend code' })).toBeInTheDocument();
+  });
+
+  it('pre-fills the email handed over from signup', async () => {
+    const { getAuthConfig } = await import('../api/endpoints');
+    vi.mocked(getAuthConfig).mockResolvedValue({ apple_enabled: false, sms_enabled: false, whatsapp_enabled: false });
+
+    renderLogin('?email=new%40example.com');
+    const emailInput = await screen.findByLabelText('Email');
+    expect(emailInput).toHaveValue('new@example.com');
   });
 });
 

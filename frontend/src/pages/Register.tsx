@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { register } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { warmUpApi } from '../api/client';
 import { playSound } from '../lib/sounds';
 
 export default function Register() {
@@ -27,11 +28,26 @@ export default function Register() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+    warmUpApi(); // the sign-up click is also a wake trigger
     try {
       await register(form);
-      await login(form.email, form.password);
-      playSound('success');
-      navigate(returnTo, { replace: true });
+      try {
+        await login(form.email, form.password);
+        playSound('success');
+        navigate(returnTo, { replace: true });
+        return;
+      } catch {
+        // The account EXISTS now — auto-login may still have raced a waking
+        // server, but the user must never be stranded at "signup failed".
+        // Land them on the login page pre-filled, where a one-time code
+        // always works.
+        playSound('beep');
+        navigate(
+          `/login?returnTo=${encodeURIComponent(returnTo)}&email=${encodeURIComponent(form.email)}`,
+          { replace: true },
+        );
+        return;
+      }
     } catch (err: unknown) {
       playSound('error');
       const status = (err as { response?: { status?: number } })?.response?.status;
