@@ -1557,12 +1557,3 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .advice-list li small { display: block; margin-top: 0.15rem; }
 .advice-saving { color: #1e5c2e; }
 
-/* ---------- sound toggle (navbar) ---------- */
-.sound-toggle {
-  border: 1.5px solid var(--line); background: #fffdf5;
-  border-radius: 999px; width: 2.2rem; height: 2.2rem;
-  font-size: 0.95rem; line-height: 1; cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.sound-toggle:hover { border-color: var(--indigo); background: #fff; }
-.nav-spacer + .sound-toggle { margin-right: 0.5rem; }
