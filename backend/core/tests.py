@@ -115,6 +115,102 @@ class AuthCodeLoginTest(TestCase):
 
 
 @NO_LIVE_DELIVERY
+class PasswordResetTest(TestCase):
+    """Forgot-password flow: request a reset code by email, verify it
+    without burning it, then set a new password. Shares the login-code
+    model, rate limit and single-use rules."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='reset@user.com', password='old-password-123')
+
+    def _request(self, email='reset@user.com'):
+        return self.client.post(reverse('password_reset_request'), {'email': email}, format='json')
+
+    def _latest_code(self):
+        return LoginCode.objects.order_by('-created_at').first().code
+
+    def test_request_sends_code_for_registered_address(self):
+        response = self._request()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(LoginCode.objects.filter(email='reset@user.com').exists())
+
+    def test_unregistered_address_gets_same_response_without_code(self):
+        # Same 200 shape either way — the endpoint must not leak which
+        # addresses are registered.
+        response = self._request('ghost@nowhere.com')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(LoginCode.objects.filter(email='ghost@nowhere.com').count(), 0)
+
+    def test_verify_checks_without_consuming(self):
+        self._request()
+        code = self._latest_code()
+        response = self.client.post(
+            reverse('password_reset_verify'), {'email': 'reset@user.com', 'code': code}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['verified'])
+        # The code is NOT consumed by verification.
+        self.assertTrue(LoginCode.objects.filter(email='reset@user.com', consumed_at__isnull=True).exists())
+
+    def test_verify_rejects_wrong_code(self):
+        self._request()
+        response = self.client.post(
+            reverse('password_reset_verify'), {'email': 'reset@user.com', 'code': '000001'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_confirm_sets_new_password_and_consumes_code(self):
+        self._request()
+        code = self._latest_code()
+        response = self.client.post(
+            reverse('password_reset_confirm'),
+            {'email': 'reset@user.com', 'code': code, 'new_password': 'brand-new-pw-456'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('brand-new-pw-456'))
+        # Single-use: the consumed code can't reset again.
+        second = self.client.post(
+            reverse('password_reset_confirm'),
+            {'email': 'reset@user.com', 'code': code, 'new_password': 'another-pw-789'},
+            format='json',
+        )
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(self.user.check_password('brand-new-pw-456'))
+
+    def test_confirm_rejects_weak_password(self):
+        self._request()
+        response = self.client.post(
+            reverse('password_reset_confirm'),
+            {'email': 'reset@user.com', 'code': self._latest_code(), 'new_password': '123'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('old-password-123'))
+
+    def test_password_login_still_works_after_reset(self):
+        self._request()
+        self.client.post(
+            reverse('password_reset_confirm'),
+            {'email': 'reset@user.com', 'code': self._latest_code(), 'new_password': 'brand-new-pw-456'},
+            format='json',
+        )
+        response = self.client.post(
+            reverse('token_obtain_pair'), {'email': 'reset@user.com', 'password': 'brand-new-pw-456'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
+    def test_rate_limit_shared_with_login_codes(self):
+        for _ in range(5):
+            self._request()
+        response = self._request()
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+@NO_LIVE_DELIVERY
 class SmsCodeLoginTest(TestCase):
     """POST /api/auth/login-code/sms/ + /api/auth/verify-login-code/sms/ —
     the phone-based twin of the email flow. Without TELNYX_API_KEY the
@@ -328,6 +424,55 @@ class MonthlyAnalyticsTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertEqual(self.user.monthly_budget_limit, Decimal('2500'))
+
+    def test_budget_advice_suggests_category_trim(self):
+        """A big non-essential category gets a concrete 25% cut suggestion."""
+        self._add_receipt(3, 200, [('Coke', self.treats, 100, 2)])  # R200 of treats
+        client = auth_client(self.user)
+        response = client.get('/api/receipts/budget_advice/', {'year': 2026, 'month': 8})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.data
+        kinds = {s['kind'] for s in data['suggestions']}
+        self.assertIn('category_cut', kinds)
+        cut = next(s for s in data['suggestions'] if s['kind'] == 'category_cut')
+        self.assertEqual(Decimal(cut['potential_saving']), Decimal('50.00'))  # 25% of R200
+        self.assertEqual(Decimal(data['potential_total_saving']), Decimal('50.00'))
+
+    def test_budget_advice_flags_impulse_and_skips_tiny_categories(self):
+        """Small non-essential spends don't lecture; impulse buys get named."""
+        self._add_receipt(5, 30, [('Chappies', self.treats, 30, 1)])  # R30 — below the R50 floor
+        client = auth_client(self.user)
+        response = client.get('/api/receipts/budget_advice/', {'year': 2026, 'month': 8})
+        data = response.data
+        kinds = {s['kind'] for s in data['suggestions']}
+        self.assertNotIn('category_cut', kinds)
+        # is_impulse items still get the impulse suggestion even when the
+        # category is small.
+        receipt = Receipt.objects.filter(purchase_date__day=5).first()
+        ReceiptItem.objects.filter(receipt=receipt).update(is_impulse=True)
+        response = client.get('/api/receipts/budget_advice/', {'year': 2026, 'month': 8})
+        kinds = {s['kind'] for s in response.data['suggestions']}
+        self.assertIn('impulse', kinds)
+
+    def test_budget_advice_empty_month_is_empty(self):
+        """No receipts in the month — no filler advice."""
+        client = auth_client(self.user)
+        response = client.get('/api/receipts/budget_advice/', {'year': 2026, 'month': 7})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['suggestions'], [])
+        self.assertEqual(Decimal(response.data['potential_total_saving']), Decimal('0'))
+
+    def test_budget_advice_is_per_user(self):
+        """Another user's spending never leaks into someone else's advice."""
+        other = User.objects.create_user(email='other@x.com', password='pass-12345678')
+        Receipt.objects.create(
+            user=other, store=self.store, purchase_date=date(2026, 8, 9),
+            total_amount=Decimal('500'), verified=True,
+        )
+        client = auth_client(self.user)
+        response = client.get('/api/receipts/budget_advice/', {'year': 2026, 'month': 8})
+        self.assertEqual(response.data['suggestions'], [])
+        self.assertEqual(Decimal(response.data['total_spent']), Decimal('0'))
 
 
 def make_store(name):

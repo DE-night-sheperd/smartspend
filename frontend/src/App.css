@@ -262,6 +262,21 @@ button:disabled { opacity: 0.55; cursor: default; box-shadow: none; }
 }
 .linklike:hover { transform: none; }
 
+/* Full-width link styled as the primary button — used by the password-reset
+   "done" card so it reads as an action, not another nav link. */
+.button-link {
+  display: block;
+  text-align: center;
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  background: var(--indigo);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transition: filter 0.15s;
+}
+.button-link:hover { filter: brightness(1.08); }
+
 .auth-card label {
   display: flex;
   flex-direction: column;
@@ -1529,3 +1544,15 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .load-more:hover:not(:disabled) { border-color: var(--indigo); color: var(--ink); }
 .load-more:disabled { opacity: 0.6; cursor: default; }
 @media (max-width: 560px) { .points-editor .form-row { grid-template-columns: 1fr; } }
+
+/* ---------- budget advice (dashboard) ---------- */
+.advice-card { margin-top: 1rem; }
+.advice-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  width: 100%; background: none; border: none; padding: 0; cursor: pointer;
+  text-align: left; font: inherit; color: inherit;
+}
+.advice-toggle:hover .chart-title { color: var(--indigo); }
+.advice-chevron { font-size: 1rem; color: var(--ink-soft); }
+.advice-list li small { display: block; margin-top: 0.15rem; }
+.advice-saving { color: #1e5c2e; }

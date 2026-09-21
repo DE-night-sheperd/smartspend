@@ -19,8 +19,9 @@ from django.db.models import Q, Sum
 from django.db.models.functions import TruncMonth
 
 from .apple_auth import verify_apple_identity_token
+from .budget_advice import build_budget_advice
 from .crypto import mask_secret
-from .emails import send_login_code_email
+from .emails import send_login_code_email, send_password_reset_email
 from .models import Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
 from .receipt_ai import analyze_receipt, analyze_receipt_text, verify_gemini_key
 from .reports import build_monthly_audit_pdf
@@ -131,6 +132,28 @@ class MeView(generics.RetrieveUpdateAPIView):
         return response
 
 
+def _delivery_error_response(exc: Exception, channel: str = 'email') -> Response:
+    """502 for a failed provider send, with the provider's actionable hint
+    when there is one (e.g. Resend testing mode: no verified domain) so the
+    user sees WHY codes aren't arriving instead of a generic failure."""
+    hint = getattr(exc, 'hint', '')
+    if hint:
+        return Response(
+            {'detail': f"Could not send the {channel} right now. {hint}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    return Response(
+        {'detail': f"Could not send the {channel} right now. Please try again."},
+        status=status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+def _deliver_password_reset(destination: str, code_obj: LoginCode) -> None:
+    """Deliver a password-reset code by email. Raises on provider errors so
+    the caller can return a clean 502."""
+    send_password_reset_email(destination, code_obj.code)
+
+
 class RequestLoginCodeView(generics.GenericAPIView):
     """POST /api/auth/login-code/ — email a single-use 6-digit login code.
 
@@ -156,14 +179,147 @@ class RequestLoginCodeView(generics.GenericAPIView):
 
         try:
             transport = _deliver_login_code(code_obj, 'email')
-        except Exception:  # noqa: BLE001 — never leak provider errors to clients
-            return Response(
-                {'detail': 'Could not send the email right now. Please try again.'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+        except Exception as exc:  # noqa: BLE001 — never leak provider internals to clients
+            return _delivery_error_response(exc)
 
         dev_hint = {'dev_code': code_obj.code} if transport is None else {}
         return Response({'detail': f'Code sent to {email}.', 'transport': transport, **dev_hint})
+
+
+class RequestPasswordResetView(generics.GenericAPIView):
+    """POST /api/auth/password-reset/ — email a single-use 6-digit reset
+    code to a REGISTERED address. Unregistered addresses get the same 200
+    shape with no email sent, so the endpoint can't be used to probe which
+    accounts exist. Same 5-codes-per-hour rate limit as login codes."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = RequestLoginCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            # Don't reveal whether the address is registered.
+            return Response({'detail': f'If that address is registered, a reset code is on its way to {email}.'})
+
+        code_obj = _create_login_code(email, request)
+        if code_obj is None:
+            return Response(
+                {'detail': 'Too many codes requested. Try again in a little while.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        try:
+            _deliver_password_reset(email, code_obj)
+        except Exception as exc:  # noqa: BLE001 — never leak provider internals to clients
+            return _delivery_error_response(exc)
+
+        # No dev_code here: the code grants account access, so it must only
+        # ever ride the email channel.
+        return Response({'detail': f'If that address is registered, a reset code is on its way to {email}.'})
+
+
+class VerifyPasswordResetCodeView(generics.GenericAPIView):
+    """POST /api/auth/password-reset/verify/ — check a reset code WITHOUT
+    consuming it, and report whether the account logs in with a password.
+    Consuming happens only in the confirm step, so a verified-but-abandoned
+    reset doesn't burn the code. Code-login accounts (no usable password)
+    are told to log in with a code instead."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = VerifyLoginCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+
+        login_code = (
+            LoginCode.objects.filter(email=email, consumed_at__isnull=True)
+            .order_by('-created_at')
+            .first()
+        )
+        if not login_code or login_code.expires_at < timezone.now():
+            return Response(
+                {'detail': 'That code is invalid or expired.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if login_code.attempts >= LOGIN_CODE_MAX_ATTEMPTS:
+            return Response(
+                {'detail': 'Too many wrong attempts. Request a new code.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if login_code.code != code:
+            LoginCode.objects.filter(pk=login_code.pk).update(attempts=login_code.attempts + 1)
+            return Response(
+                {'detail': 'That code is invalid or expired.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(email=email).first()
+        if user is None or not user.has_usable_password():
+            return Response(
+                {'detail': 'This account signs in with one-time codes. Log in with a code instead — no password needed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'detail': 'Code verified — choose a new password.', 'verified': True})
+
+
+class ConfirmPasswordResetView(generics.GenericAPIView):
+    """POST /api/auth/password-reset/confirm/ — set a new password using a
+    valid reset code. The code is consumed (single-use) and Django's normal
+    password validators apply to the new value."""
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = VerifyLoginCodeSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+        new_password = str(request.data.get('new_password') or '')
+
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            return Response(
+                {'detail': 'That code is invalid or expired.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        login_code = (
+            LoginCode.objects.filter(email=email, consumed_at__isnull=True)
+            .order_by('-created_at')
+            .first()
+        )
+        invalid = Response({'detail': 'That code is invalid or expired.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not login_code or login_code.expires_at < timezone.now():
+            return invalid
+        if login_code.attempts >= LOGIN_CODE_MAX_ATTEMPTS:
+            return Response(
+                {'detail': 'Too many wrong attempts. Request a new code.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if login_code.code != code:
+            LoginCode.objects.filter(pk=login_code.pk).update(attempts=login_code.attempts + 1)
+            return invalid
+
+        from django.contrib.auth.password_validation import validate_password
+
+        try:
+            validate_password(new_password, user=user)
+        except Exception as exc:  # noqa: BLE001 — DRF maps ValidationError messages for us
+            return Response({'new_password': [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        login_code.consumed_at = timezone.now()
+        login_code.save(update_fields=['consumed_at'])
+        return Response({'detail': 'Password updated. You can log in with it now.'})
 
 
 class VerifyLoginCodeView(generics.GenericAPIView):
@@ -211,11 +367,8 @@ class RequestSmsCodeView(RequestLoginCodeView):
 
         try:
             transport = _deliver_login_code(code_obj, 'sms')
-        except Exception:  # noqa: BLE001 — never leak provider errors to clients
-            return Response(
-                {'detail': 'Could not send the SMS right now. Please try again.'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+        except Exception as exc:  # noqa: BLE001 — never leak provider internals to clients
+            return _delivery_error_response(exc, 'SMS')
 
         dev_hint = {'dev_code': code_obj.code} if transport is None else {}
         return Response({'detail': f'Code sent to {phone}.', 'transport': transport or 'dev', **dev_hint})
@@ -267,11 +420,8 @@ class RequestWhatsappCodeView(RequestSmsCodeView):
 
         try:
             transport = _deliver_login_code(code_obj, 'whatsapp')
-        except Exception:  # noqa: BLE001 — never leak provider errors to clients
-            return Response(
-                {'detail': 'Could not send the WhatsApp message right now. Please try again.'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+        except Exception as exc:  # noqa: BLE001 — never leak provider internals to clients
+            return _delivery_error_response(exc, 'WhatsApp message')
 
         dev_hint = {'dev_code': code_obj.code} if transport is None else {}
         return Response({'detail': f'Code sent to {phone}.', 'transport': transport or 'dev', **dev_hint})
@@ -812,6 +962,22 @@ class ReceiptViewSet(viewsets.ModelViewSet):
             ],
         })
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='budget_advice')
+    def budget_advice(self, request):
+        """Automated budget-adjustment suggestions for one month: concrete
+        "cut X to save Y" moves ranked by what they're worth, computed from
+        this user's own receipts (categories, impulse flags, pacing, store
+        frequency, month-over-month trend). Query params: ?year=&month=."""
+        today = timezone.now().date()
+        try:
+            year = int(request.query_params.get('year', today.year))
+            month = int(request.query_params.get('month', today.month))
+        except (TypeError, ValueError):
+            raise ParseError('year and month must be integers')
+        if not 1 <= month <= 12:
+            raise ParseError('month must be 1-12')
+        return Response(build_budget_advice(request.user, year, month))
 
     @action(detail=False, methods=['get'])
     def monthly_audit_pdf(self, request):

@@ -42,6 +42,9 @@ export default function LoginPassword() {
           {submitting ? 'Logging in…' : 'Log in'}
         </button>
         <p className="auth-switch">
+          <Link to="/login">Reset a forgotten password</Link>
+        </p>
+        <p className="auth-switch">
           Prefer no password? <Link to="/login">Email me a code</Link>
         </p>
       </form>

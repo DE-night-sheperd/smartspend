@@ -9,7 +9,9 @@ import type { Receipt } from '../types';
  * Two jobs:
  * 1. In the receipts list — the receipt card IS the slip.
  * 2. Print (window.print with a print-only stylesheet) — the user can show
- *    or hand over the digital slip for returns/disputes at the store.
+ *    or hand over the digital slip for returns/disputes at the store. The
+ *    tapped slip gets a temporary .print-target class so exactly one slip
+ *    prints, even with a full list on the page.
  */
 
 // Deterministic pseudo-barcode from the receipt id: bar widths vary but are
@@ -29,6 +31,21 @@ function dots(name: string, price: string): { name: string; dots: string; price:
   const used = name.length + price.length;
   const n = Math.max(3, target - used);
   return { name, dots: '.'.repeat(n), price };
+}
+
+/** Print exactly this slip: mark it, run the browser's print dialog, then
+ * unmark whatever the dialog left marked. */
+function printOnlySlip(slip: Element) {
+  slip.classList.add('print-target');
+  const cleanup = () => {
+    document.querySelectorAll('.print-target').forEach((el) => el.classList.remove('print-target'));
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  // afterprint is unreliable in some browsers — also clean up on the next tick
+  // (the print dialog blocks JS, so this runs only after it closes).
+  setTimeout(cleanup, 500);
 }
 
 export default function TillSlip({ receipt, expanded = false }: { receipt: Receipt; expanded?: boolean }) {
@@ -148,7 +165,10 @@ export default function TillSlip({ receipt, expanded = false }: { receipt: Recei
           <button
             type="button"
             className="button-secondary till-print-btn"
-            onClick={() => window.print()}
+            onClick={(e) => {
+              const slip = e.currentTarget.closest('.till-slip');
+              if (slip) printOnlySlip(slip);
+            }}
           >
             🖨️ Print return slip
           </button>

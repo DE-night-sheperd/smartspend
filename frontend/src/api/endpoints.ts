@@ -4,6 +4,7 @@ import type {
   GeminiKeyConnectResult,
   GeminiKeyStatus,
   LoyaltyPointsRow,
+  BudgetAdvice,
   MonthBreakdown,
   MonthlyAnalytics,
   OcrDraft,
@@ -33,6 +34,26 @@ export async function verifyLoginCode(
 ): Promise<{ access: string; refresh: string; created_account: boolean }> {
   const { data } = await api.post('/auth/verify-login-code/', { email, code });
   tokenStore.setTokens(data.access, data.refresh);
+  return data;
+}
+
+/** Forgot password: request a 6-digit reset code by email. The response
+ * never reveals whether the address is registered. */
+export async function requestPasswordReset(email: string): Promise<{ detail: string }> {
+  const { data } = await api.post('/auth/password-reset/', { email });
+  return data;
+}
+
+/** Check a reset code without consuming it. Fails with a message when the
+ * account signs in with one-time codes instead of a password. */
+export async function verifyPasswordResetCode(email: string, code: string): Promise<{ detail: string; verified: boolean }> {
+  const { data } = await api.post('/auth/password-reset/verify/', { email, code });
+  return data;
+}
+
+/** Set a new password using a valid reset code (consumes it). */
+export async function confirmPasswordReset(email: string, code: string, newPassword: string): Promise<{ detail: string }> {
+  const { data } = await api.post('/auth/password-reset/confirm/', { email, code, new_password: newPassword });
   return data;
 }
 
@@ -294,6 +315,15 @@ export async function downloadMonthlyAuditPdf(year: number, month: number) {
 
 export async function getMonthlyAnalytics() {
   const { data } = await api.get<MonthlyAnalytics[]>('/receipts/monthly_analytics/');
+  return data;
+}
+
+/** Automated "cut X to save Y" suggestions for one month, computed from
+ * the user's own receipts (categories, impulse flags, pacing, stores). */
+export async function getBudgetAdvice(year: number, month: number) {
+  const { data } = await api.get<BudgetAdvice>('/receipts/budget_advice/', {
+    params: { year, month },
+  });
   return data;
 }
 

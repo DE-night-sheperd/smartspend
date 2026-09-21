@@ -3,15 +3,19 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   appleSignIn,
+  confirmPasswordReset,
   getAuthConfig,
   requestLoginCode,
+  requestPasswordReset,
   requestSmsCode,
   requestWhatsappCode,
+  verifyPasswordResetCode,
 } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
 type Step = 'input' | 'code';
 type Channel = 'email' | 'sms' | 'whatsapp';
+type Mode = 'login' | 'forgot';
 
 const APPLE_JS_URL =
   'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
@@ -32,11 +36,198 @@ function formatCountdown(totalSeconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** The forgot-password flow: email → reset code → new password. Rendered
+ * inside the login page so "Forgot password?" never leaves the context. */
+function ForgotPassword() {
+  const [stage, setStage] = useState<'email' | 'code' | 'newPassword'>('email');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setInterval(() => {
+      setResendIn((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendIn > 0]);
+
+  async function requestReset() {
+    setError(null);
+    setBusy(true);
+    try {
+      await requestPasswordReset(email);
+      setStage('code');
+      setResendIn(RESEND_SECONDS);
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? 'Could not send a reset code. Check the address and try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkCode() {
+    setError(null);
+    setBusy(true);
+    try {
+      await verifyPasswordResetCode(email, code);
+      setStage('newPassword');
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? 'That code did not work. Request a new one if it expired.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePassword(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (password.length < 8) {
+      setError('Passwords need at least 8 characters.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await confirmPasswordReset(email, code, password);
+      setDone(true);
+    } catch (err: unknown) {
+      const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+      const messages = data
+        ? Object.entries(data).flatMap(([, v]) => (Array.isArray(v) ? v.map(String) : [String(v)]))
+        : [];
+      setError(messages.join(' ') || 'Could not set the new password. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="auth-card">
+        <h1>Password updated</h1>
+        <p className="auth-lede">
+          Your new password is set. Log in with it — or with a one-time code — as usual.
+        </p>
+        <Link className="button-link" to="/login-password">
+          Log in with a password
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      key={stage}
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      style={{ width: '100%', maxWidth: 380 }}
+    >
+      <form
+        className="auth-card"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (stage === 'email') void requestReset();
+          else if (stage === 'code') void checkCode();
+          else void savePassword(e);
+        }}
+      >
+        <h1>Reset your password</h1>
+        {stage === 'email' && (
+          <>
+            <p className="auth-lede">We'll email you a 6-digit code to set a new password.</p>
+            <label>
+              Email
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+            {error && <p className="form-error">{error}</p>}
+            <button type="submit" disabled={busy}>
+              {busy ? 'Sending code…' : 'Email me a reset code'}
+            </button>
+          </>
+        )}
+        {stage === 'code' && (
+          <>
+            <p className="auth-lede">
+              Enter the 6-digit code we sent to <strong>{email}</strong>. It expires in 10 minutes.
+            </p>
+            <label>
+              Reset code
+              <input
+                className="code-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                pattern="\d{6}"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="······"
+                required
+              />
+            </label>
+            {error && <p className="form-error">{error}</p>}
+            <button type="submit" disabled={busy || code.length !== 6}>
+              {busy ? 'Checking…' : 'Verify code'}
+            </button>
+            <p className="auth-switch">
+              Didn't get it?{' '}
+              {resendIn > 0 ? (
+                <span aria-live="polite">Resend code in {formatCountdown(resendIn)}</span>
+              ) : (
+                <button type="button" className="linklike" onClick={() => void requestReset()} disabled={busy}>
+                  Resend code
+                </button>
+              )}
+            </p>
+          </>
+        )}
+        {stage === 'newPassword' && (
+          <>
+            <p className="auth-lede">Code verified — choose a new password.</p>
+            <label>
+              New password (min 8 characters)
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </label>
+            {error && <p className="form-error">{error}</p>}
+            <button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : 'Set new password'}
+            </button>
+          </>
+        )}
+        <p className="auth-switch">
+          Remembered it?{' '}
+          <Link to="/login">Back to log in</Link>
+        </p>
+      </form>
+    </motion.div>
+  );
+}
+
 export default function Login() {
   const { loginWithCode } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo') ?? '/dashboard';
+  const [mode, setMode] = useState<Mode>('login');
   const [channel, setChannel] = useState<Channel>('email');
   const [step, setStep] = useState<Step>('input');
   const [email, setEmail] = useState('');
@@ -175,6 +366,10 @@ export default function Login() {
   }
 
   const channelNoun = channel === 'email' ? 'inbox' : 'messages';
+
+  if (mode === 'forgot') {
+    return <ForgotPassword />;
+  }
 
   return (
     <div className="auth-page">
@@ -321,6 +516,14 @@ export default function Login() {
                 Start over
               </button>
             </p>
+            {channel === 'email' && (
+              <p className="auth-switch">
+                Forgot your password?{' '}
+                <button type="button" className="linklike" onClick={() => setMode('forgot')}>
+                  Reset it by email
+                </button>
+              </p>
+            )}
           </form>
         )}
       </motion.div>

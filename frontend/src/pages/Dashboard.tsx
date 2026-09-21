@@ -16,12 +16,19 @@ import {
 } from 'recharts';
 import {
   downloadMonthlyAuditPdf,
+  getBudgetAdvice,
   getGeminiKeyStatus,
   getMonthBreakdown,
   getMonthlyAnalytics,
   listPoints,
 } from '../api/endpoints';
-import type { GeminiKeyStatus, LoyaltyPointsRow, MonthBreakdown, MonthlyAnalytics } from '../types';
+import type {
+  BudgetAdvice,
+  GeminiKeyStatus,
+  LoyaltyPointsRow,
+  MonthBreakdown,
+  MonthlyAnalytics,
+} from '../types';
 import { useAuth } from '../context/AuthContext';
 import AnimatedNumber from '../components/AnimatedNumber';
 import { celebrate } from '../lib/celebrate';
@@ -46,6 +53,8 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [rows, setRows] = useState<MonthlyAnalytics[]>([]);
   const [breakdown, setBreakdown] = useState<MonthBreakdown | null>(null);
+  const [advice, setAdvice] = useState<BudgetAdvice | null>(null);
+  const [adviceOpen, setAdviceOpen] = useState(true);
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
@@ -82,6 +91,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadBreakdown(cursor.year, cursor.month);
+    getBudgetAdvice(cursor.year, cursor.month)
+      .then(setAdvice)
+      .catch(() => setAdvice(null));
   }, [cursor, loadBreakdown]);
 
   function shiftMonth(delta: number) {
@@ -342,6 +354,49 @@ export default function Dashboard() {
                   <Bar dataKey="Impulse spend" fill="#e8483a" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+            </motion.div>
+          )}
+
+          {/* Automated budget suggestions — concrete "cut X to save Y" moves */}
+          {advice && advice.suggestions.length > 0 && (
+            <motion.div
+              className="list-card advice-card"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.42 }}
+            >
+              <button
+                type="button"
+                className="advice-toggle"
+                onClick={() => setAdviceOpen((o) => !o)}
+                aria-expanded={adviceOpen}
+              >
+                <h2 className="chart-title">
+                  💡 Ways to save this month
+                </h2>
+                <span className="advice-chevron" aria-hidden="true">
+                  {adviceOpen ? '▾' : '▸'}
+                </span>
+              </button>
+              {adviceOpen && (
+                <>
+                  <ol className="ranked-list advice-list">
+                    {advice.suggestions.map((s) => (
+                      <li key={s.kind + s.title}>
+                        <span>
+                          <strong>{s.title}</strong>
+                          <small> · {s.detail}</small>
+                        </span>
+                        <strong className="num-tick advice-saving">+R{fmtRand(s.potential_saving)}</strong>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="biggest-note">
+                    Sticking to every suggestion could free up about{' '}
+                    <strong className="num-tick">R{fmtRand(advice.potential_total_saving)}</strong> next month.
+                  </p>
+                </>
+              )}
             </motion.div>
           )}
 
