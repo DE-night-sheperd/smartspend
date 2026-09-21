@@ -37,6 +37,14 @@ class User(AbstractUser):
     phone = models.CharField(max_length=32, blank=True, help_text='E.164 number, e.g. +27821234567')
     user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     monthly_budget_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    login_count = models.PositiveIntegerField(
+        default=0, editable=False,
+        help_text='Total successful sign-ins across every channel (password, email/SMS/WhatsApp code, Apple).',
+    )
+    last_login_at = models.DateTimeField(
+        blank=True, null=True, editable=False,
+        help_text='Timestamp of the most recent successful sign-in.',
+    )
     gemini_key_encrypted = models.TextField(
         blank=True, default='', editable=False,
         help_text='The user\'s own Gemini API key (BYOK), Fernet-encrypted at rest.',
@@ -137,6 +145,39 @@ class LoginCode(models.Model):
         )
         if ids:
             cls.objects.filter(email=email).exclude(id__in=ids).delete()
+
+
+class LoginAudit(models.Model):
+    """One row per successful sign-in, on every channel.
+
+    Written by `core.views.record_login` whenever tokens are issued (password
+    login, email/SMS/WhatsApp code login, Sign in with Apple). Feeds the
+    per-user audit trail (`/api/me/logins/` and the Settings card) so both
+    the user and the operator can see exactly when accounts were accessed —
+    and from where.
+    """
+
+    class Method(models.TextChoices):
+        PASSWORD = 'password', 'Password'
+        EMAIL_CODE = 'email_code', 'Email code'
+        SMS_CODE = 'sms_code', 'SMS code'
+        WHATSAPP_CODE = 'whatsapp_code', 'WhatsApp code'
+        APPLE = 'apple', 'Apple'
+
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='login_audits')
+    method = models.CharField(max_length=20, choices=Method.choices)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    ip = models.GenericIPAddressField(blank=True, null=True)
+    user_agent = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'login audit entry'
+        verbose_name_plural = 'login audit entries'
+
+    def __str__(self):
+        return f'{self.user.email} · {self.method} · {self.created_at:%Y-%m-%d %H:%M}'
 
 
 class Receipt(models.Model):

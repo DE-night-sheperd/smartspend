@@ -418,9 +418,10 @@ describe('GuestRoute', () => {
 
 describe('Settings page', () => {
   it('keeps the budget limit inside profile settings, after the profile fields', async () => {
-    const { getMe, getGeminiKeyStatus } = await import('../api/endpoints');
+    const { getMe, getGeminiKeyStatus, getLoginAudit } = await import('../api/endpoints');
     vi.mocked(getMe).mockResolvedValue(me);
     vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: false, key_hint: '' });
+    vi.mocked(getLoginAudit).mockResolvedValue([]);
     tokenStore.setTokens('access', 'refresh');
 
     // Mirror ProtectedRoute: Settings only mounts once auth has resolved.
@@ -448,9 +449,10 @@ describe('Settings page', () => {
   });
 
   it('offers the BYOK Gemini connect flow when not connected', async () => {
-    const { getMe, getGeminiKeyStatus } = await import('../api/endpoints');
+    const { getMe, getGeminiKeyStatus, getLoginAudit } = await import('../api/endpoints');
     vi.mocked(getMe).mockResolvedValue(me);
     vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: false, key_hint: '' });
+    vi.mocked(getLoginAudit).mockResolvedValue([]);
     tokenStore.setTokens('access', 'refresh');
 
     render(
@@ -466,6 +468,63 @@ describe('Settings page', () => {
     ).toHaveAttribute('href', 'https://aistudio.google.com/app/apikey');
     expect(screen.getByLabelText(/Paste your Gemini API key/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect Gemini' })).toBeInTheDocument();
+  });
+
+  it('shows the sign-in activity card with the login count and recent trail', async () => {
+    const { getMe, getGeminiKeyStatus, getLoginAudit } = await import('../api/endpoints');
+    vi.mocked(getMe).mockResolvedValue(me);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: false, key_hint: '' });
+    vi.mocked(getLoginAudit).mockResolvedValue([
+      {
+        login_count: 12,
+        last_login_at: '2026-09-21T10:00:00Z',
+        method: 'email_code',
+        created_at: '2026-09-21T10:00:00Z',
+        ip: '102.65.3.7',
+        user_agent: 'Mozilla/5.0',
+      },
+      {
+        login_count: 12,
+        last_login_at: '2026-09-21T10:00:00Z',
+        method: 'password',
+        created_at: '2026-09-14T08:30:00Z',
+        ip: null,
+        user_agent: '',
+      },
+    ]);
+    tokenStore.setTokens('access', 'refresh');
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Settings />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Sign-in activity' })).toBeInTheDocument();
+    expect(screen.getByText('12', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText(/total sign-ins/)).toBeInTheDocument();
+    expect(screen.getByText('Email code')).toBeInTheDocument();
+    expect(screen.getByText('Password', { selector: '.login-audit-method' })).toBeInTheDocument();
+    expect(screen.getByText(/from 102\.65\.3\.7/)).toBeInTheDocument();
+  });
+
+  it('shows the empty state when no sign-ins are recorded', async () => {
+    const { getMe, getGeminiKeyStatus, getLoginAudit } = await import('../api/endpoints');
+    vi.mocked(getMe).mockResolvedValue(me);
+    vi.mocked(getGeminiKeyStatus).mockResolvedValue({ connected: false, key_hint: '' });
+    vi.mocked(getLoginAudit).mockResolvedValue([]);
+    tokenStore.setTokens('access', 'refresh');
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Settings />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Sign-in activity' })).toBeInTheDocument();
+    expect(screen.getByText('No sign-ins recorded yet.')).toBeInTheDocument();
   });
 
   it('shows the connected state with a masked key hint and disconnect action', async () => {

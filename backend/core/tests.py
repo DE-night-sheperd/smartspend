@@ -16,7 +16,7 @@ from rest_framework.test import APIClient
 
 from unittest import mock
 
-from .models import BudgetAlert, Category, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
+from .models import BudgetAlert, Category, LoginAudit, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
 from . import reminders as reminders_mod
 from . import emails as emails_mod
 from . import budget_emails as budget_emails_mod
@@ -677,6 +677,106 @@ class AppleSignInTest(TestCase):
                 reverse('apple_sign_in'), {'identity_token': 'x' * 60}, format='json'
             )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+@NO_LIVE_DELIVERY
+class LoginAuditTest(TestCase):
+    """Per-user login auditing: every successful sign-in — password,
+    email/SMS/WhatsApp code, Apple — appends a LoginAudit row and bumps the
+    user's login_count/last_login_at; /api/me/logins/ serves the trail."""
+
+    def _code_login(self, email: str) -> None:
+        self.client.post(reverse('request_login_code'), {'email': email}, format='json')
+        code = LoginCode.objects.order_by('-created_at').first()
+        response = self.client.post(
+            reverse('verify_login_code'), {'email': email, 'code': code.code}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_email_code_login_audited_with_counter(self):
+        self._code_login('audit@user.com')
+        user = User.objects.get(email='audit@user.com')
+        self.assertEqual(user.login_count, 1)
+        self.assertIsNotNone(user.last_login_at)
+        entry = LoginAudit.objects.get(user=user)
+        self.assertEqual(entry.method, LoginAudit.Method.EMAIL_CODE)
+
+    def test_password_login_audited(self):
+        User.objects.create_user(email='pw@user.com', password='pass-12345678')
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            {'email': 'pw@user.com', 'password': 'pass-12345678'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user = User.objects.get(email='pw@user.com')
+        self.assertEqual(user.login_count, 1)
+        self.assertTrue(LoginAudit.objects.filter(user=user, method=LoginAudit.Method.PASSWORD).exists())
+
+    def test_failed_password_login_not_audited(self):
+        User.objects.create_user(email='pw2@user.com', password='pass-12345678')
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            {'email': 'pw2@user.com', 'password': 'wrong-password'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        user = User.objects.get(email='pw2@user.com')
+        self.assertEqual(user.login_count, 0)
+        self.assertEqual(LoginAudit.objects.count(), 0)
+
+    def test_sms_and_apple_logins_audited_with_channel(self):
+        with override_settings(TELNYX_API_KEY=''):
+            self.client.post(
+                reverse('request_login_code_sms'), {'phone': '082 555 0001'}, format='json'
+            )
+        sms_code = LoginCode.objects.order_by('-created_at').first()
+        response = self.client.post(
+            reverse('verify_login_code_sms'),
+            {'phone': '082 555 0001', 'code': sms_code.code},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        with override_settings(APPLE_CLIENT_ID='com.example.smartspend'):
+            with mock.patch(
+                'core.views.verify_apple_identity_token',
+                return_value={'email': 'audit.apple@icloud.com', 'sub': 'x'},
+            ):
+                response = APIClient().post(
+                    reverse('apple_sign_in'), {'identity_token': 'x' * 60}, format='json'
+                )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        sms_user = User.objects.get(email='+27825550001')
+        apple_user = User.objects.get(email='audit.apple@icloud.com')
+        self.assertTrue(LoginAudit.objects.filter(user=sms_user, method=LoginAudit.Method.SMS_CODE).exists())
+        self.assertTrue(LoginAudit.objects.filter(user=apple_user, method=LoginAudit.Method.APPLE).exists())
+        self.assertEqual(sms_user.login_count, 1)
+        self.assertEqual(apple_user.login_count, 1)
+
+    def test_me_logins_endpoint_serves_trail_newest_first(self):
+        self._code_login('trail@user.com')
+        self._code_login('trail@user.com')
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email='trail@user.com'))
+        response = client.get(reverse('me_logins'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]['method'], LoginAudit.Method.EMAIL_CODE)
+        self.assertGreaterEqual(response.data[0]['created_at'], response.data[1]['created_at'])
+        self.assertEqual(response.data[0]['login_count'], 2)
+        self.assertIsNotNone(response.data[0]['last_login_at'])
+
+    def test_me_logins_requires_auth_and_isolates_users(self):
+        self._code_login('iso@user.com')
+        self._code_login('other@user.com')
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email='iso@user.com'))
+        response = client.get(reverse('me_logins'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(APIClient().get(reverse('me_logins')).status_code, 401)
 
 
 @NO_LIVE_DELIVERY

@@ -1,6 +1,6 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     AppleSignInView,
@@ -12,7 +12,9 @@ from .views import (
     GeminiKeyDisconnectView,
     GeminiKeyStatusView,
     LoyaltyPointsViewSet,
+    MeLoginsView,
     MeView,
+    PasswordLoginAuditView,
     ReceiptItemViewSet,
     ReceiptViewSet,
     RegisterView,
@@ -37,7 +39,7 @@ router.register('points', LoyaltyPointsViewSet, basename='loyaltypoints')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
-    path('auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/login/', PasswordLoginAuditView.as_view(), name='token_obtain_pair'),
     path('auth/login-code/', RequestLoginCodeView.as_view(), name='request_login_code'),
     path('auth/verify-login-code/', VerifyLoginCodeView.as_view(), name='verify_login_code'),
     path('auth/password-reset/', RequestPasswordResetView.as_view(), name='password_reset_request'),
@@ -50,6 +52,7 @@ urlpatterns = [
     path('auth/apple/', AppleSignInView.as_view(), name='apple_sign_in'),
     path('auth/config/', AuthConfigView.as_view(), name='auth_config'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('me/logins/', MeLoginsView.as_view(), name='me_logins'),
     path('me/', MeView.as_view(), name='me'),
     path('me/password/', ChangePasswordView.as_view(), name='change_password'),
     path('cron/daily/', CronDailyView.as_view(), name='cron_daily'),

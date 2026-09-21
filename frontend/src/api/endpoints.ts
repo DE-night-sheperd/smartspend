@@ -3,6 +3,7 @@ import type {
   Category,
   GeminiKeyConnectResult,
   GeminiKeyStatus,
+  LoginAuditEntry,
   LoyaltyPointsRow,
   BudgetAdvice,
   MonthBreakdown,
@@ -159,6 +160,15 @@ export async function extractReceiptText(text: string): Promise<OcrDraft> {
 // the user creates their free key at AI Studio and pastes it once; scans
 // then use their own key/quota. Keys are stored encrypted server-side and
 // are never returned to the client.
+
+// --- Sign-in audit trail ----------------------------------------------------
+// Every successful sign-in (password, email/SMS/WhatsApp code, Apple) is
+// recorded server-side; this serves the newest entries plus the totals.
+
+export async function getLoginAudit(): Promise<LoginAuditEntry[]> {
+  const { data } = await api.get<LoginAuditEntry[]>('/me/logins/');
+  return data;
+}
 
 export async function getGeminiKeyStatus(): Promise<GeminiKeyStatus> {
   const { data } = await api.get<GeminiKeyStatus>('/me/gemini-key/');
