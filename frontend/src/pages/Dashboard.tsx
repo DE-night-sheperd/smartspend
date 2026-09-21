@@ -32,6 +32,7 @@ import type {
 import { useAuth } from '../context/AuthContext';
 import AnimatedNumber from '../components/AnimatedNumber';
 import { celebrate } from '../lib/celebrate';
+import { playSound } from '../lib/sounds';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -466,6 +467,9 @@ export default function Dashboard() {
     setDownloading(true);
     try {
       await downloadMonthlyAuditPdf(target.year, target.month);
+      playSound('pop');
+    } catch {
+      playSound('error');
     } finally {
       setDownloading(false);
     }

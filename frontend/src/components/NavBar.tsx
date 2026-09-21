@@ -2,6 +2,7 @@ import { useRef, useState, useLayoutEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
+import SoundToggle from './SoundToggle';
 
 const TABS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -56,6 +57,7 @@ export default function NavBar() {
         )}
       </div>
       <div className="nav-spacer" />
+      <SoundToggle />
       <button
         className="link-button"
         onClick={() => {

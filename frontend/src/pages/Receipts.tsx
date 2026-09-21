@@ -15,6 +15,7 @@ import {
 } from '../api/endpoints';
 import type { Category, OcrDraft, Receipt, Store } from '../types';
 import { celebrate } from '../lib/celebrate';
+import { playSound } from '../lib/sounds';
 import SlipScanner from '../components/SlipScanner';
 
 interface ReceiptFilters {
@@ -133,7 +134,9 @@ export default function Receipts() {
       setPendingImage(file);
       setEditing(null);
       setShowForm(true);
+      playSound('beep');
     } catch {
+      playSound('error');
       setScanError('Could not read that image. You can still add the receipt manually below.');
       setShowForm(true);
     } finally {
@@ -154,7 +157,9 @@ export default function Receipts() {
       setPasteOpen(false);
       setPasteText('');
       setToast('Draft ready — check the details, then save');
+      playSound('beep');
     } catch {
+      playSound('error');
       setScanError('Could not read that receipt text. You can still add the receipt manually below.');
       setShowForm(true);
     } finally {
@@ -184,9 +189,11 @@ export default function Receipts() {
     setDeletingId(receipt.receipt_id);
     try {
       await deleteReceipt(receipt.receipt_id);
+      playSound('swipe');
       setReceipts((rs) => rs.filter((r) => r.receipt_id !== receipt.receipt_id));
       setToast('Receipt deleted');
     } catch {
+      playSound('error');
       setToast('Could not delete that receipt.');
     } finally {
       setDeletingId(null);
@@ -571,6 +578,7 @@ function ReceiptForm({
 
       onSaved(receipt, editing ? 'edit' : 'create');
     } catch (err) {
+      playSound('error');
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(detail || (err instanceof Error ? err.message : 'Could not save this receipt.'));
     } finally {
