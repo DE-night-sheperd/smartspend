@@ -1,10 +1,12 @@
-/* SmartSpend service worker — v1
+/* SmartSpend service worker — v2
    App-shell + assets cache-first with background refresh; API calls and
    uploaded receipt images always hit the network (they must never be
    served stale). No offline page: the app requires connectivity for auth
-   and data, the cache just makes repeat visits instant. */
+   and data, the cache just makes repeat visits instant.
+   v2: new API base resolution (same-origin /api/) — bump forces every
+   client to drop the v1 shell cache and pick up the fixed bundle. */
 
-const VERSION = 'smartspend-v1';
+const VERSION = 'smartspend-v2';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg'];
 
 self.addEventListener('install', (event) => {

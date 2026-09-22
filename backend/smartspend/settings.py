@@ -34,6 +34,14 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
 
+# Public HTTPS: Django's CSRF check also validates the Origin header; set
+# this to the deployed frontend/API origin (one deploy target means the
+# same origin). With a separate frontend host, add it via the
+# DJANGO_CSRF_TRUSTED_ORIGINS env var (comma-separated, scheme included).
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    'DJANGO_CSRF_TRUSTED_ORIGINS', ''
+).split(',') if os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS') else []
+
 
 # Application definition
 
@@ -68,6 +76,10 @@ AUTH_USER_MODEL = 'core.User'
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173'
 ).split(',')
+
+# Behind the managed proxy TLS terminates upstream — trust its forwarded
+# header so is_secure()/CSRF Origin checks see https on public requests.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -107,6 +119,27 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'smartspend.wsgi.application'
+
+# Static files: collectstatic target for production (the managed host runs
+# it after pip-installing api/requirements.txt). Whitenoise serves
+# STATIC_ROOT with compression + far-future cache headers in prod; dev
+# (DEBUG=True) keeps Django's normal static handling and needs no extra
+# package installed.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+if not DEBUG:
+    try:
+        import whitenoise  # noqa: F401
+
+        MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    except ImportError:  # pragma: no cover - prod installs it via api/
+        pass
+
+# --- Media ----------------------------------------------------------------
+# Receipt photos are stored under MEDIA_ROOT (gitignored) and served by
+# Django in dev. In production, Django itself serves them (see
+# smartspend/urls.py) so uploaded receipts stay visible with no extra
+# storage service — swap DEFAULT_FILE_STORAGE for S3/Supabase Storage when
+# scaling beyond that.
 
 
 # Database
