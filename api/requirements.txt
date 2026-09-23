@@ -1,0 +1,24 @@
+# Backend dependencies for the managed-hosting Python contract (api/*.py).
+# Mirrors backend/requirements.txt plus the WSGI server and static-file
+# middleware used when the API is served in-process next to the built SPA.
+# Keep the two files in sync — api/index.py imports the Django app from
+# backend/ directly.
+
+Django==5.2.17
+cryptography==50.0.1
+django-cors-headers==4.9.0
+djangorestframework==3.18.1
+djangorestframework_simplejwt==5.5.1
+gunicorn==23.0.0
+matplotlib==3.10.9
+numpy==2.2.6
+opencv-python-headless==5.0.0.93
+pillow==12.3.0
+psycopg2-binary==2.9.13
+PyJWT==2.14.0
+pytesseract==0.3.13
+python-dotenv==1.2.3
+requests==2.34.2
+reportlab==5.0.1
+tzdata==2025.2
+whitenoise==6.11.0

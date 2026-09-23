@@ -1,0 +1,73 @@
+# Render blueprint for the SmartSpend Django API.
+#
+# Use this when the API gets its own host instead of riding in-process with
+# the managed static deploy (api/index.py). From the Render dashboard:
+# "New +" → "Blueprint" → point it at this repo — Render reads this file.
+# Then build the frontend with VITE_API_BASE_URL=https://<this-service>/api
+# (frontend/.env.production) so the SPA calls the dedicated API host.
+#
+# Database: the app expects Supabase Postgres (see DATABASE.md) — supply the
+# pooler host/credentials as secrets in the Render dashboard; they are
+# intentionally NOT hard-coded here. Point SYNC_DATABASE at the same
+# Supabase instance used in dev so production users land in the same data.
+
+services:
+  - type: web
+    name: smartspend-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    # bind 0.0.0.0:$PORT (Render injects PORT); workers stay low for the
+    # free tier's memory ceiling. Startup migration: Render runs
+    # release-phase commands only on paid plans, so migrate runs as a
+    # pre-start step here (idempotent; cheap when nothing is pending).
+    preStartCommand: python manage.py migrate --noinput
+    startCommand: gunicorn smartspend.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 60
+    healthCheckPath: /api/auth/config/
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: DJANGO_SETTINGS_MODULE
+        value: smartspend.settings
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true   # rotate in the dashboard; never in git
+      - key: DJANGO_ALLOWED_HOSTS
+        value: smartspend-api.onrender.com
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        value: https://smartspend-api.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: http://localhost:5173,http://127.0.0.1:5173
+        # Add your deployed frontend origin here when you have one, e.g.
+        # value: https://your-frontend-host.example.com
+      - key: API_BRIDGE_SKIP_MIGRATIONS
+        value: "1"            # migrations run via preStartCommand instead
+      # --- Supabase Postgres (set these in the dashboard as secrets) ---
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      # --- Optional integrations (all have dev fallbacks) ---
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: TELNYX_API_KEY
+        sync: false
+      - key: TELNYX_FROM
+        sync: false
+      - key: CRON_SECRET_KEY
+        generateValue: true

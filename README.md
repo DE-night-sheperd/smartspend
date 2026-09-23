@@ -230,24 +230,26 @@ out of the box.
 
 ## Deploying
 
-**Frontend** — a standard Vite SPA. The repo root carries a `package.json`
-and `vite.config.ts` so managed hosting can detect the Vite + React stack:
-`npm run build` from the **repo root** builds the app out of `frontend/`
-and emits static output to `dist/` at the root (verified: clean exit with
-`index.html` + hashed assets + the PWA manifest/service worker). Static
-hosts need the usual SPA history fallback so `/dashboard`, `/receipts`,
-`/points` and `/settings` serve `index.html`.
+**How production works** — the managed host builds the SPA (`vite build` →
+`dist/`) and also runs Python from `api/` in-process. `api/index.py` boots
+the Django app from `backend/` (running migrations on first request), so
+the deployed frontend talks to the API **same-origin** at `/api/` — no
+tunnel, no separate backend host, no CORS. Static hosts still need the
+usual SPA history fallback so `/dashboard`, `/receipts`, `/points` and
+`/settings` serve `index.html`.
 
-**API** — the Django backend is a long-running Python process (SQLite/
-Postgres, media uploads, JWT, admin), so it needs a Python host; it
-cannot run inside a Node-only static builder. Deploy it to any Python
-platform (or keep using the managed preview, which runs the full stack
-via `sh ./scripts/dev.sh`), then build the frontend with
-`VITE_API_BASE_URL=https://your-api-host/api` so the deployed app talks
-to it (unset, the built app expects the API at same-origin `/api`).
+**Dedicated API host (alternative)** — if you'd rather run the API on its
+own Python platform, this repo ships a Render blueprint (`render.yaml`):
+from Render, "New +" → "Blueprint" → this repo, fill the Supabase Postgres
+secrets in the dashboard, and build the frontend with
+`VITE_API_BASE_URL=https://<render-service>/api` so the SPA calls the
+dedicated host. The client retries transient 502/503/504s and network
+errors for ~30s, absorbing free-tier cold starts.
 
 **Backend production settings** (all env-driven, see `backend/.env.example`):
 `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS=<your-api-host>`,
+`DJANGO_CSRF_TRUSTED_ORIGINS=<https://your-api-host>` (needed because
+Django validates the Origin header on public POSTs),
 `CORS_ALLOWED_ORIGINS=<your-frontend-origin>`, `POSTGRES_HOST/NAME/USER/
 PASSWORD/PORT` for Postgres (SQLite is dev-only), plus the optional
 `GEMINI_API_KEY` / `BREVO_*` / `RESEND_*` / `TELNYX_*` / `APPLE_CLIENT_ID`

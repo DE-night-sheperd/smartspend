@@ -7,15 +7,12 @@ import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 // split local dev on localhost. Hosted dev previews always use the
 // same-origin proxy so a stale local .env can never break them.
 //
-// PROD bridge: the managed static host only ships dist/, so the deployed app
-// has no same-origin /api — it talks to the Django API exposed by the
-// workspace tunnel instead. That URL is committed here (not passed as a
-// build env var) because the hosting builder routes env values through a
-// runtime envelope Vite cannot read at build time. Update it if the
-// workspace API host changes, or point it at a dedicated API host later.
-const PROD_API_BRIDGE =
-  'https://8000-2826ecac-f239-4972-b4d9-c0041cf83a05.daytonaproxy01.net/api';
-
+// PROD fallback: the managed static host also runs the Django API in-process
+// from api/ (same origin), so the default production base is /api itself.
+// Set VITE_API_BASE_URL at build time to point the SPA at a dedicated API
+// host instead (e.g. a Render service URL — see render.yaml). Only trusted
+// when it is a real URL — a runtime env envelope must never become the
+// axios baseURL.
 const isLocalhost =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 const envApiUrl = import.meta.env.VITE_API_BASE_URL;
@@ -24,15 +21,18 @@ const envApiUrl = import.meta.env.VITE_API_BASE_URL;
 // the axios baseURL.
 const envApiUrlOk =
   typeof envApiUrl === 'string' && /^https?:\/\//.test(envApiUrl);
-export const API_BASE_URL = import.meta.env.PROD
-  ? envApiUrlOk
+
+function withTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url : `${url}/`;
+}
+
+export const API_BASE_URL = withTrailingSlash(
+  envApiUrlOk
     ? envApiUrl
-    : PROD_API_BRIDGE
-  : isLocalhost
-    ? envApiUrlOk
-      ? envApiUrl
-      : '/api'
-    : '/api';
+    : import.meta.env.PROD && !isLocalhost
+      ? '/api/'
+      : '/api',
+);
 
 const ACCESS_KEY = 'smartspend_access';
 const REFRESH_KEY = 'smartspend_refresh';
@@ -45,7 +45,7 @@ const REFRESH_KEY = 'smartspend_refresh';
  */
 export function warmUpApi(): void {
   void axios
-    .get(`${API_BASE_URL}/auth/config/`, { timeout: 45_000 })
+    .get(`${API_BASE_URL}auth/config/`, { timeout: 45_000 })
     .catch(() => undefined);
 }
 
@@ -64,11 +64,11 @@ export const tokenStore = {
 
 export const api = axios.create({ baseURL: API_BASE_URL });
 
-// The deployed app reaches the API through a tunnel that can return 502/503
-// with "proxy upstream error" while the API server behind it wakes up (the
-// first request itself starts the wake). Those are transient — retry
-// transparently for up to ~30s so a cold start is absorbed silently and the
-// user only ever sees the button's normal "Sending…" state.
+// The API host can briefly return 502/503/504 while its server wakes up
+// (free tiers suspend idle instances; the first request itself starts the
+// wake). Those are transient — retry transparently for up to ~30s so a cold
+// start is absorbed silently and the user only ever sees the button's
+// normal "Sending…" state.
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
 const RETRY_DELAYS_MS = [1500, 3000, 5000, 8000, 12000];
 
@@ -92,7 +92,7 @@ async function refreshAccessToken(): Promise<string | null> {
   const refresh = tokenStore.getRefresh();
   if (!refresh) return null;
   try {
-    const { data } = await axios.post(`${API_BASE_URL}/auth/refresh/`, { refresh });
+    const { data } = await axios.post(`${API_BASE_URL}auth/refresh/`, { refresh });
     tokenStore.setTokens(data.access, refresh);
     return data.access as string;
   } catch {
