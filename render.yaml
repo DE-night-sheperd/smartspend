@@ -3,9 +3,8 @@
 # Use this when the API gets its own host instead of riding in-process with
 # the managed static deploy (api/index.py). From the Render dashboard:
 # "New +" → "Blueprint" → point it at this repo — Render reads this file.
-# Then build the frontend with VITE_API_BASE_URL=https://<this-service>/api
-# (frontend/.env.production) so the SPA calls the dedicated API host.
-#
+# The Freebuff static build then points the SPA at this API via the
+# VITE_API_BASE_URL production env var (= https://smartspend-api.onrender.com/api).
 # Database: the app expects Supabase Postgres (see DATABASE.md) — supply the
 # pooler host/credentials as secrets in the Render dashboard; they are
 # intentionally NOT hard-coded here. Point SYNC_DATABASE at the same
@@ -38,11 +37,10 @@ services:
       - key: DJANGO_ALLOWED_HOSTS
         value: smartspend-api.onrender.com
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
-        value: https://smartspend-api.onrender.com
+        value: https://smartspend-api.onrender.com,https://smartspend.freebuff.app
       - key: CORS_ALLOWED_ORIGINS
-        value: http://localhost:5173,http://127.0.0.1:5173
-        # Add your deployed frontend origin here when you have one, e.g.
-        # value: https://your-frontend-host.example.com
+        # Deployed SPA (Freebuff static host) + local dev frontends.
+        value: https://smartspend.freebuff.app,http://localhost:5173,http://127.0.0.1:5173
       - key: API_BRIDGE_SKIP_MIGRATIONS
         value: "1"            # migrations run via preStartCommand instead
       # --- Supabase Postgres (set these in the dashboard as secrets) ---
