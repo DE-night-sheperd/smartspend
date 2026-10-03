@@ -23,6 +23,27 @@ export async function login(email: string, password: string) {
   return data;
 }
 
+/** One-tap guest access: the backend provisions an isolated throwaway
+ * account and returns normal JWTs, so no sign-up wall stands between a
+ * visitor and the app. The session can be claimed later without data loss. */
+export async function guestLogin() {
+  const { data } = await api.post('/auth/guest/');
+  tokenStore.setTokens(data.access, data.refresh);
+  return data as { access: string; refresh: string; user: User; created_account: boolean };
+}
+
+/** Upgrade the current guest session into a real account — same user row,
+ * so receipts, points and settings carry over. */
+export async function claimAccount(payload: {
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+}): Promise<{ user: User }> {
+  const { data } = await api.post<{ user: User }>('/auth/claim/', payload);
+  return data;
+}
+
 /** Email-code login: request a 6-digit code, then exchange it for JWTs. */
 export async function requestLoginCode(email: string): Promise<{ detail: string; transport: string; dev_code?: string }> {
   const { data } = await api.post('/auth/login-code/', { email });
@@ -39,8 +60,10 @@ export async function verifyLoginCode(
 }
 
 /** Forgot password: request a 6-digit reset code by email. The response
- * never reveals whether the address is registered. */
-export async function requestPasswordReset(email: string): Promise<{ detail: string }> {
+ * never reveals whether the address is registered. When no email provider
+ * is configured (dev/preview), it also carries `dev_code` so the flow can
+ * actually be completed — same fallback as login codes. */
+export async function requestPasswordReset(email: string): Promise<{ detail: string; dev_code?: string }> {
   const { data } = await api.post('/auth/password-reset/', { email });
   return data;
 }

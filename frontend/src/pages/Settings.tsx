@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   changePassword,
@@ -213,6 +214,20 @@ export default function Settings() {
         transition={{ duration: 0.3, delay: 0.05 }}
       >
         <h2>Password</h2>
+        {user?.is_guest ? (
+          /* Guests have no password yet — the change-password form would
+             always fail. Point them at the claim flow instead. */
+          <>
+            <p className="field-hint">
+              You're browsing as a guest — there's no password on this session yet.
+              Create an account and everything you scanned stays exactly where it is.
+            </p>
+            <Link className="button-link" to="/register">
+              Create an account
+            </Link>
+          </>
+        ) : (
+          <>
         <p className="field-hint">
           Used when you log in with a password. Email-code logins keep working either way.
         </p>
@@ -262,6 +277,8 @@ export default function Settings() {
             {pwStatus === 'saving' ? 'Updating…' : pwStatus === 'saved' ? 'Password updated ✓' : 'Change password'}
           </button>
         </form>
+          </>
+        )}
       </motion.section>
 
       <motion.section
@@ -374,6 +391,7 @@ const LOGIN_METHOD_LABEL: Record<LoginAuditEntry['method'], string> = {
   sms_code: 'SMS code',
   whatsapp_code: 'WhatsApp code',
   apple: 'Apple',
+  guest: 'Guest session',
 };
 
 function formatLoginDate(iso: string): string {

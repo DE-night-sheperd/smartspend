@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, type Variants } from 'framer-motion';
 import StoryScene from '../components/StoryScene';
 import { useAuth } from '../context/AuthContext';
@@ -36,7 +36,21 @@ const STEPS = [
 
 export default function Landing() {
   // A signed-in visitor should never be pitched signup — hand them the app.
-  const { user, loading, logout } = useAuth();
+  // A guest, however, is shown both doors: keep exploring, or claim the
+  // session with an account so their data outlives the browser.
+  const { user, loading, logout, loginAsGuest } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleGuest() {
+    try {
+      await loginAsGuest();
+      navigate('/dashboard', { replace: true });
+    } catch {
+      // The guest endpoint is rate-limited — fall back to the login page
+      // where the error (and the password path) is surfaced inline.
+      navigate('/login');
+    }
+  }
   return (
     <div className="landing">
       <motion.header
@@ -56,7 +70,7 @@ export default function Landing() {
         <motion.div className="hero-copy" variants={container} initial="hidden" animate="show">
           <motion.h1 variants={rise}>Scan slips, track spending, stay in budget.</motion.h1>
           <motion.div className="hero-actions" variants={rise}>
-            {loading ? null : user ? (
+            {loading ? null : user && !user.is_guest ? (
               <>
                 <Link to="/dashboard" className="landing-cta">Go to dashboard →</Link>
                 <button type="button" className="landing-cta ghost" onClick={() => logout()}>
@@ -64,10 +78,27 @@ export default function Landing() {
                 </button>
                 <p className="landing-welcome">Welcome back, {user.first_name} — your ledger is as you left it.</p>
               </>
+            ) : user ? (
+              /* guest session */
+              <>
+                <Link to="/dashboard" className="landing-cta">Keep exploring →</Link>
+                <Link to="/register" className="landing-cta ghost">Create account</Link>
+                <p className="landing-welcome">
+                  You're in as a guest — create an account to keep your receipts safe.
+                </p>
+              </>
             ) : (
               <>
                 <Link to="/register" className="landing-cta">Create account</Link>
                 <Link to="/login" className="landing-cta ghost">Log in</Link>
+                <button
+                  type="button"
+                  className="landing-cta ghost"
+                  onClick={() => void handleGuest()}
+                >
+                  Continue as guest
+                </button>
+                <p className="landing-welcome">No account needed — look around first.</p>
               </>
             )}
           </motion.div>

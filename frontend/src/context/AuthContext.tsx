@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
+  claimAccount as apiClaimAccount,
   getMe,
+  guestLogin as apiGuestLogin,
   login as apiLogin,
   logout as apiLogout,
   verifyLoginCode,
@@ -14,6 +16,10 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** One-tap guest session — no email, no password, no code. */
+  loginAsGuest: () => Promise<void>;
+  /** Claim the current guest session with an email + password (keeps data). */
+  claimAccount: (payload: { email: string; password: string; first_name?: string; last_name?: string }) => Promise<void>;
   /** Email, SMS or WhatsApp code login. Returns true when the account was just created. */
   loginWithCode: (channel: 'email' | 'sms' | 'whatsapp', destination: string, code: string) => Promise<boolean>;
   logout: () => void;
@@ -52,6 +58,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshUser();
   }
 
+  async function loginAsGuest() {
+    await apiGuestLogin();
+    await refreshUser();
+  }
+
+  async function claimAccount(payload: { email: string; password: string; first_name?: string; last_name?: string }) {
+    await apiClaimAccount(payload);
+    await refreshUser();
+  }
+
   async function loginWithCode(channel: 'email' | 'sms' | 'whatsapp', destination: string, code: string) {
     const result =
       channel === 'sms'
@@ -69,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithCode, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, loginAsGuest, claimAccount, loginWithCode, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 from unittest import mock
 
 from .models import BudgetAlert, Category, LoginAudit, LoginCode, LoyaltyPoints, Receipt, ReceiptItem, Store
+from .views import GuestLoginView
 from . import reminders as reminders_mod
 from . import emails as emails_mod
 from . import budget_emails as budget_emails_mod
@@ -118,6 +119,169 @@ class AuthCodeLoginTest(TestCase):
 
 
 @NO_LIVE_DELIVERY
+class GuestLoginTest(TestCase):
+    """POST /api/auth/guest/ mints a throwaway account + JWT pair in one
+    tap, and POST /api/auth/claim/ upgrades that same session into a real
+    email+password account without losing any data."""
+
+    def test_guest_login_creates_isolated_guest_account(self):
+        response = self.client.post(reverse('guest_login'), {}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
+        user = User.objects.get(pk=response.data['user']['user_id'])
+        self.assertTrue(user.is_guest)
+        self.assertFalse(user.has_usable_password())
+        self.assertTrue(user.email.startswith('guest-'))
+        self.assertTrue(response.data['user']['is_guest'])
+
+    def _bearer(self, access: str) -> APIClient:
+        """A fresh DRF client authenticated with the given JWT."""
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
+        return client
+
+    def test_guest_session_works_on_authenticated_endpoints(self):
+        guest_tokens = self.client.post(reverse('guest_login'), {}, format='json').data
+        authed = self._bearer(guest_tokens['access'])
+        me = authed.get(reverse('me'))
+        self.assertEqual(me.status_code, status.HTTP_200_OK)
+        self.assertTrue(me.data['is_guest'])
+        # …and can create its own receipts (per-user isolation intact).
+        receipt = authed.post(
+            reverse('receipt-list'),
+            {
+                'store_name': 'Checkers', 'purchase_date': '2026-10-01',
+                'total_amount': '55.00', 'items': [],
+            },
+            format='json',
+        )
+        self.assertEqual(receipt.status_code, status.HTTP_201_CREATED)
+
+    def test_guest_login_is_rate_limited_per_ip(self):
+        for _ in range(GuestLoginView.GUESTS_PER_IP_PER_HOUR):
+            response = self.client.post(reverse('guest_login'), {}, format='json')
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        blocked = self.client.post(reverse('guest_login'), {}, format='json')
+        self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_claim_converts_guest_into_password_account(self):
+        guest = self.client.post(reverse('guest_login'), {}, format='json').data
+        authed = self._bearer(guest['access'])
+        # A receipt exists BEFORE claiming — it must survive the upgrade.
+        authed.post(
+            reverse('receipt-list'),
+            {
+                'store_name': 'Woolworths', 'purchase_date': '2026-10-02',
+                'total_amount': '88.00', 'items': [],
+            },
+            format='json',
+        )
+
+        claim = authed.post(
+            reverse('claim_account'),
+            {
+                'email': 'Claimed@Example.com',
+                'password': 'claim-me-pw-99',
+                'first_name': 'Thandi',
+                'last_name': 'M',
+            },
+            format='json',
+        )
+        self.assertEqual(claim.status_code, status.HTTP_200_OK)
+        user = User.objects.get(pk=guest['user']['user_id'])
+        self.assertFalse(user.is_guest)
+        self.assertEqual(user.email, 'claimed@example.com')
+        self.assertTrue(user.check_password('claim-me-pw-99'))
+        # Data carried over — same user row.
+        self.assertEqual(user.receipts.count(), 1)
+
+        # And the claimed account logs in with the password, no code needed.
+        login = self.client.post(
+            reverse('token_obtain_pair'),
+            {'email': 'claimed@example.com', 'password': 'claim-me-pw-99'},
+            format='json',
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+
+    def test_claim_rejects_duplicate_email(self):
+        User.objects.create_user(email='taken@example.com', password='pass-12345678')
+        guest = self.client.post(reverse('guest_login'), {}, format='json').data
+        authed = self._bearer(guest['access'])
+        response = authed.post(
+            reverse('claim_account'),
+            {'email': 'taken@example.com', 'password': 'claim-me-pw-99'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_claim_rejects_already_claimed_account(self):
+        user = User.objects.create_user(email='real@example.com', password='pass-12345678')
+        client = auth_client(user)
+        response = client.post(
+            reverse('claim_account'),
+            {'email': 'other@example.com', 'password': 'claim-me-pw-99'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+    def test_claim_requires_authentication(self):
+        response = self.client.post(
+            reverse('claim_account'),
+            {'email': 'x@example.com', 'password': 'claim-me-pw-99'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_password_login_on_guest_account_explains_no_password(self):
+        """A code-created/guest address must not read as 'wrong password' —
+        the API says how to actually get in."""
+        guest = self.client.post(reverse('guest_login'), {}, format='json').data
+        guest_email = User.objects.get(pk=guest['user']['user_id']).email
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            {'email': guest_email, 'password': 'anything-at-all'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn('does not have a password yet', response.data['detail'])
+
+    def test_code_created_account_can_adopt_password_via_reset(self):
+        """Forgot-password now works for code-created accounts too — the
+        reset is how they adopt a password and start logging in with it."""
+        self.client.post(reverse('request_login_code'), {'email': 'coder@user.com'}, format='json')
+        code = LoginCode.objects.order_by('-created_at').first()
+        self.client.post(
+            reverse('verify_login_code'), {'email': 'coder@user.com', 'code': code.code}, format='json'
+        )
+        user = User.objects.get(email='coder@user.com')
+        self.assertFalse(user.has_usable_password())
+
+        self.client.post(reverse('password_reset_request'), {'email': 'coder@user.com'}, format='json')
+        reset_code = LoginCode.objects.filter(email='coder@user.com').order_by('-created_at').first().code
+        verify = self.client.post(
+            reverse('password_reset_verify'),
+            {'email': 'coder@user.com', 'code': reset_code},
+            format='json',
+        )
+        self.assertEqual(verify.status_code, status.HTTP_200_OK)
+        confirm = self.client.post(
+            reverse('password_reset_confirm'),
+            {'email': 'coder@user.com', 'code': reset_code, 'new_password': 'adopted-pw-42'},
+            format='json',
+        )
+        self.assertEqual(confirm.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('adopted-pw-42'))
+        login = self.client.post(
+            reverse('token_obtain_pair'),
+            {'email': 'coder@user.com', 'password': 'adopted-pw-42'},
+            format='json',
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+
+
+@NO_LIVE_DELIVERY
 class PasswordResetTest(TestCase):
     """Forgot-password flow: request a reset code by email, verify it
     without burning it, then set a new password. Shares the login-code
@@ -211,6 +375,16 @@ class PasswordResetTest(TestCase):
             self._request()
         response = self._request()
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_request_without_email_provider_returns_dev_code(self):
+        # No RESEND/BREVO key → console transport → the code rides back to
+        # the UI (same fallback as login codes) so a password can actually
+        # be set in dev/previews. Registered and unregistered stay
+        # indistinguishable in shape: both carry detail, only the code differs.
+        response = self._request()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('dev_code', response.data)
+        self.assertEqual(response.data['dev_code'], self._latest_code())
 
 
 @NO_LIVE_DELIVERY
@@ -874,17 +1048,20 @@ class LoyaltyPointsTest(TestCase):
         self.assertEqual(rows.first().label, 'Clicks ClubCard points')
 
     def test_points_list_expires_soonest_first_and_active_filter(self):
+        # Relative dates: hardcoded ones rot (2026-09-25 was "soon" when
+        # written, but lapsed once the calendar passed it).
+        today = timezone.now().date()
         LoyaltyPoints.objects.create(
             user=self.user, store=self.store, points=100,
-            label='Soon', expires_at=date(2026, 9, 25),
+            label='Soon', expires_at=today + timedelta(days=5),
         )
         LoyaltyPoints.objects.create(
             user=self.user, store=self.store, points=500,
-            label='Later', expires_at=date(2026, 10, 20),
+            label='Later', expires_at=today + timedelta(days=40),
         )
         LoyaltyPoints.objects.create(
             user=self.user, store=self.store, points=50,
-            label='Expired', expires_at=date(2026, 9, 1),
+            label='Expired', expires_at=today - timedelta(days=10),
         )
         response = self.client.get(reverse('loyaltypoints-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)

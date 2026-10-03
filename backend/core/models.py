@@ -35,6 +35,11 @@ class User(AbstractUser):
     username = None
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=32, blank=True, help_text='E.164 number, e.g. +27821234567')
+    is_guest = models.BooleanField(
+        default=False,
+        help_text='Throwaway guest session — usable immediately, claimable into a '
+                  'full account (email + password) without losing any data.',
+    )
     user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     monthly_budget_limit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     login_count = models.PositiveIntegerField(
@@ -163,6 +168,7 @@ class LoginAudit(models.Model):
         SMS_CODE = 'sms_code', 'SMS code'
         WHATSAPP_CODE = 'whatsapp_code', 'WhatsApp code'
         APPLE = 'apple', 'Apple'
+        GUEST = 'guest', 'Guest'
 
     id = models.BigAutoField(primary_key=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='login_audits')

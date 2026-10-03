@@ -7,10 +7,13 @@ import { warmUpApi } from '../api/client';
 import { playSound } from '../lib/sounds';
 
 export default function Register() {
-  const { login } = useAuth();
+  const { login, user, claimAccount, loginAsGuest } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo') ?? '/dashboard';
+  // A guest session signs up differently: the SAME account is upgraded in
+  // place (email + password attached) so nothing they scanned is lost.
+  const isClaiming = Boolean(user?.is_guest);
   const [form, setForm] = useState({
     email: '',
     first_name: '',
@@ -19,9 +22,26 @@ export default function Register() {
   });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [guestBusy, setGuestBusy] = useState(false);
 
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function handleGuest() {
+    setError(null);
+    setGuestBusy(true);
+    warmUpApi();
+    try {
+      await loginAsGuest();
+      playSound('beep');
+      navigate(returnTo, { replace: true });
+    } catch (err: unknown) {
+      playSound('error');
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? 'Could not start a guest session. Try again.');
+      setGuestBusy(false);
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -30,6 +50,14 @@ export default function Register() {
     setSubmitting(true);
     warmUpApi(); // the sign-up click is also a wake trigger
     try {
+      if (isClaiming) {
+        // Guest → account: same user row, receipts intact. Tokens already
+        // exist, so there is no second login step.
+        await claimAccount(form);
+        playSound('success');
+        navigate(returnTo, { replace: true });
+        return;
+      }
       await register(form);
       try {
         await login(form.email, form.password);
@@ -90,8 +118,12 @@ export default function Register() {
         transition={{ duration: 0.35, ease: 'easeOut' }}
       >
         <span className="auth-brand">R:</span>
-        <h1>Create your account</h1>
-        <p className="auth-lede">Snap receipts, tame impulse buys, and close every month in the green.</p>
+        <h1>{isClaiming ? 'Save your session' : 'Create your account'}</h1>
+        <p className="auth-lede">
+          {isClaiming
+            ? 'Add an email and password to keep everything you scanned as a guest.'
+            : 'Snap receipts, tame impulse buys, and close every month in the green.'}
+        </p>
 
         <div className="form-row">
           <label>
@@ -129,11 +161,40 @@ export default function Register() {
           </p>
         )}
         <button type="submit" disabled={submitting}>
-          {submitting ? 'Creating account…' : 'Sign up'}
+          {submitting
+            ? isClaiming
+              ? 'Saving…'
+              : 'Creating account…'
+            : isClaiming
+              ? 'Create my account'
+              : 'Sign up'}
         </button>
         <p className="auth-switch">
-          Already have an account? <Link to="/login">Log in</Link>
+          {isClaiming ? (
+            <>
+              Just looking around? <Link to="/dashboard">Back to the app</Link>
+            </>
+          ) : (
+            <>
+              Already have an account? <Link to="/login">Log in</Link>
+            </>
+          )}
         </p>
+        {!isClaiming && (
+          <>
+            <div className="auth-divider" aria-hidden="true">
+              <span>or</span>
+            </div>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => void handleGuest()}
+              disabled={guestBusy}
+            >
+              {guestBusy ? 'Starting…' : 'Continue as guest →'}
+            </button>
+          </>
+        )}
       </motion.form>
     </div>
   );
