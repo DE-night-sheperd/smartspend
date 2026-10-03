@@ -7,10 +7,12 @@ from .views import (
     AuthConfigView,
     CategoryViewSet,
     ChangePasswordView,
+    ClaimAccountView,
     CronDailyView,
     GeminiKeyConnectView,
     GeminiKeyDisconnectView,
     GeminiKeyStatusView,
+    GuestLoginView,
     LoyaltyPointsViewSet,
     MeLoginsView,
     MeView,
@@ -39,6 +41,8 @@ router.register('points', LoyaltyPointsViewSet, basename='loyaltypoints')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
+    path('auth/guest/', GuestLoginView.as_view(), name='guest_login'),
+    path('auth/claim/', ClaimAccountView.as_view(), name='claim_account'),
     path('auth/login/', PasswordLoginAuditView.as_view(), name='token_obtain_pair'),
     path('auth/login-code/', RequestLoginCodeView.as_view(), name='request_login_code'),
     path('auth/verify-login-code/', VerifyLoginCodeView.as_view(), name='verify_login_code'),

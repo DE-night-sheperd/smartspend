@@ -31,8 +31,12 @@ function AnimatedRoutes() {
         {/* Signed-in users are bounced to the dashboard — auth CTAs never
             render for someone who is already logged in. Privacy stays open. */}
         <Route path="/" element={<PageFade><GuestRoute><Landing /></GuestRoute></PageFade>} />
-        <Route path="/login" element={<PageFade><GuestRoute><Login /></GuestRoute></PageFade>} />
-        <Route path="/login-password" element={<PageFade><GuestRoute><LoginPassword /></GuestRoute></PageFade>} />
+        {/* Password sign-in is the primary path; the one-time-code flow
+            still exists at /login-code for anyone who prefers it. */}
+        <Route path="/login" element={<PageFade><GuestRoute><LoginPassword /></GuestRoute></PageFade>} />
+        <Route path="/login-code" element={<PageFade><GuestRoute><Login /></GuestRoute></PageFade>} />
+        {/* Old bookmark/redirect target — same password page. */}
+        <Route path="/login-password" element={<Navigate to="/login" replace />} />
         <Route path="/register" element={<PageFade><GuestRoute><Register /></GuestRoute></PageFade>} />
         <Route path="/privacy" element={<PageFade><Privacy /></PageFade>} />
 

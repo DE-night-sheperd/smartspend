@@ -1,6 +1,7 @@
 import csv
 import io
 import random
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 
@@ -11,7 +12,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ParseError, ValidationError
+from rest_framework.exceptions import AuthenticationFailed, ParseError, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework import serializers
 from rest_framework.response import Response
@@ -30,6 +31,7 @@ from .serializers import (
     AppleSignInSerializer,
     CategorySerializer,
     ChangePasswordSerializer,
+    ClaimAccountSerializer,
     LoyaltyWriteSerializer,
     MonthlyAnalyticsSerializer,
     MonthBreakdownSerializer,
@@ -103,6 +105,88 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
 
 
+class GuestLoginView(generics.GenericAPIView):
+    """POST /api/auth/guest/ — one-tap guest access, no sign-up wall.
+
+    Creates an isolated throwaway account (unique synthetic email, unusable
+    password) and mints a normal JWT pair, so every endpoint, permission and
+    per-user isolation rule works exactly as it does for a real account.
+    Guests can later claim the session via POST /api/auth/claim/ and keep
+    all their receipts — the user row is simply upgraded in place.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    GUESTS_PER_IP_PER_HOUR = 20
+
+    def post(self, request):
+        # Light abuse guard: the endpoint is intentionally open, so cap how
+        # many guest accounts one IP can mint in a rolling hour.
+        ip = request.META.get('REMOTE_ADDR')
+        recent = LoginAudit.objects.filter(
+            method=LoginAudit.Method.GUEST,
+            ip=ip,
+            created_at__gte=timezone.now() - timedelta(hours=1),
+        ).count()
+        if recent >= self.GUESTS_PER_IP_PER_HOUR:
+            return Response(
+                {'detail': 'Too many guest sessions from this device. Create an account instead.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        guest_email = f'guest-{uuid.uuid4().hex[:16]}@guest.smartspend.local'
+        with transaction.atomic():
+            user = User.objects.create(
+                email=guest_email,
+                first_name='Guest',
+                last_name='',
+                monthly_budget_limit=0,
+                is_guest=True,
+            )
+            user.set_unusable_password()
+            user.save(update_fields=['password'])
+
+        refresh = TokenObtainPairSerializerForUser.get_token(user)
+        record_login(user, request, LoginAudit.Method.GUEST)
+        return Response(
+            {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data,
+                'created_account': True,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ClaimAccountView(generics.GenericAPIView):
+    """POST /api/auth/claim/ — upgrade the current guest session into a real
+    account: attach an email + password to the SAME user row so receipts,
+    points and settings carry over. Only guests may claim; real accounts
+    answer 409 so a signed-in user can't silently re-key their identity."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ClaimAccountSerializer
+
+    def post(self, request):
+        if not request.user.is_guest:
+            return Response(
+                {'detail': 'This account is already claimed — just log in with your password.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        user.email = serializer.validated_data['email']
+        user.first_name = serializer.validated_data.get('first_name') or user.first_name
+        user.last_name = serializer.validated_data.get('last_name') or user.last_name
+        user.set_password(serializer.validated_data['password'])
+        user.is_guest = False
+        user.save()
+        return Response({'user': UserSerializer(user).data}, status=status.HTTP_200_OK)
+
+
 class MeView(generics.RetrieveUpdateAPIView):
     """GET/PATCH the logged-in user's own profile (budget limit, name, etc)."""
     serializer_class = UserSerializer
@@ -148,10 +232,11 @@ def _delivery_error_response(exc: Exception, channel: str = 'email') -> Response
     )
 
 
-def _deliver_password_reset(destination: str, code_obj: LoginCode) -> None:
-    """Deliver a password-reset code by email. Raises on provider errors so
-    the caller can return a clean 502."""
-    send_password_reset_email(destination, code_obj.code)
+def _deliver_password_reset(destination: str, code_obj: LoginCode) -> str:
+    """Deliver a password-reset code by email. Returns the transport name
+    ('resend' / 'brevo') for a real send, or 'console' when no provider is
+    configured. Raises on provider errors so the caller can return a 502."""
+    return send_password_reset_email(destination, code_obj.code)
 
 
 class RequestLoginCodeView(generics.GenericAPIView):
@@ -213,21 +298,24 @@ class RequestPasswordResetView(generics.GenericAPIView):
             )
 
         try:
-            _deliver_password_reset(email, code_obj)
+            transport = _deliver_password_reset(email, code_obj)
         except Exception as exc:  # noqa: BLE001 — never leak provider internals to clients
             return _delivery_error_response(exc)
 
-        # No dev_code here: the code grants account access, so it must only
-        # ever ride the email channel.
-        return Response({'detail': f'If that address is registered, a reset code is on its way to {email}.'})
+        # Without an email provider the code only ever reaches the server
+        # console — the same dev fallback login codes use — so hand it to the
+        # UI too; otherwise password adoption is a dead end in dev/previews.
+        # A configured provider transports the code by email only, as before.
+        dev_hint = {'dev_code': code_obj.code} if transport == 'console' else {}
+        return Response({'detail': f'If that address is registered, a reset code is on its way to {email}.', **dev_hint})
 
 
 class VerifyPasswordResetCodeView(generics.GenericAPIView):
     """POST /api/auth/password-reset/verify/ — check a reset code WITHOUT
-    consuming it, and report whether the account logs in with a password.
-    Consuming happens only in the confirm step, so a verified-but-abandoned
-    reset doesn't burn the code. Code-login accounts (no usable password)
-    are told to log in with a code instead."""
+    consuming it. Consuming happens only in the confirm step, so a
+    verified-but-abandoned reset doesn't burn the code. Accounts that never
+    had a password (email/SMS-code or guest created) pass too: for them the
+    reset IS the way to adopt a password and sign in with it."""
 
     permission_classes = [permissions.AllowAny]
     serializer_class = VerifyLoginCodeSerializer
@@ -261,9 +349,9 @@ class VerifyPasswordResetCodeView(generics.GenericAPIView):
             )
 
         user = User.objects.filter(email=email).first()
-        if user is None or not user.has_usable_password():
+        if user is None:
             return Response(
-                {'detail': 'This account signs in with one-time codes. Log in with a code instead — no password needed.'},
+                {'detail': 'That code is invalid or expired.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response({'detail': 'Code verified — choose a new password.', 'verified': True})
@@ -317,6 +405,11 @@ class ConfirmPasswordResetView(generics.GenericAPIView):
 
         user.set_password(new_password)
         user.save(update_fields=['password'])
+        # A guest session that resets its password has effectively claimed
+        # itself — stop treating it as a throwaway account.
+        if user.is_guest:
+            user.is_guest = False
+            user.save(update_fields=['is_guest'])
         login_code.consumed_at = timezone.now()
         login_code.save(update_fields=['consumed_at'])
         return Response({'detail': 'Password updated. You can log in with it now.'})
@@ -603,10 +696,35 @@ def record_login(user, request, method: LoginAudit.Method) -> None:
 class PasswordLoginAuditView(TokenObtainPairView):
     """POST /api/auth/login/ — simplejwt's token pair, plus a login-audit
     row. Wrapping the view (rather than the serializer) keeps the audit
-    recording at the same layer as the other channels."""
+    recording at the same layer as the other channels.
+
+    Also translates simplejwt's generic failure into an actionable hint
+    when the address belongs to an account that has never had a password
+    (created by an email/SMS code, Apple, or a guest session): those users
+    need to set one first, not guess why their password is "wrong"."""
 
     def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
+        try:
+            response = super().post(request, *args, **kwargs)
+        except AuthenticationFailed:
+            # simplejwt answers "No active account…" for wrong password AND
+            # for addresses that never had one (code/guest created) — those
+            # two need different advice, so split them here.
+            user = User.objects.filter(
+                email__iexact=str(request.data.get('email') or '')
+            ).first()
+            if user is not None and not user.has_usable_password():
+                return Response(
+                    {
+                        'detail': (
+                            'This account does not have a password yet — it was '
+                            'created with a one-time code or as a guest. Use '
+                            '"Forgot password?" to set one, then log in with it.'
+                        )
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            raise
         if response.status_code == 200 and isinstance(response.data, dict) and 'access' in response.data:
             user = User.objects.filter(email__iexact=str(request.data.get('email') or '')).first()
             if user is not None:

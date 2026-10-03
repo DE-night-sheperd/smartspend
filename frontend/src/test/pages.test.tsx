@@ -273,7 +273,7 @@ describe('Login OTP flow', () => {
     );
 
     renderLogin();
-    await screen.findByRole('heading', { name: 'Log in to SmartSpend' });
+    await screen.findByRole('heading', { name: 'Log in with a one-time code' });
 
     const emailInput = screen.getByLabelText('Email');
     await user.type(emailInput, 'sipho@example.com{Enter}');
@@ -296,7 +296,7 @@ describe('Login OTP flow', () => {
     vi.mocked(requestLoginCode).mockRejectedValue({ response: { status: 502, data: { detail: 'Could not send the email right now. Please try again.' } } });
 
     renderLogin();
-    await screen.findByRole('heading', { name: 'Log in to SmartSpend' });
+    await screen.findByRole('heading', { name: 'Log in with a one-time code' });
 
     await user.type(screen.getByLabelText('Email'), 'sipho@example.com{Enter}');
 

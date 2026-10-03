@@ -14,8 +14,9 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'user_id', 'email', 'phone', 'first_name', 'last_name',
             'monthly_budget_limit', 'created_at', 'login_count', 'last_login_at',
+            'is_guest',
         ]
-        read_only_fields = ['user_id', 'created_at']
+        read_only_fields = ['user_id', 'created_at', 'is_guest']
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -34,6 +35,26 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+
+
+class ClaimAccountSerializer(serializers.Serializer):
+    """Input for POST /api/auth/claim/ — a guest session adopts an email +
+    password. The guest's receipts, points and settings stay attached to the
+    same user row, so nothing is lost when the session is upgraded."""
+
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    first_name = serializers.CharField(required=False, allow_blank=True, default='')
+    last_name = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        user = self.context['request'].user
+        if User.objects.filter(email__iexact=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError(
+                'That email is already registered. Log in with it instead.'
+            )
+        return value
 
 
 class ChangePasswordSerializer(serializers.Serializer):

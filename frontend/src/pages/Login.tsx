@@ -49,6 +49,9 @@ function ForgotPassword() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [resendIn, setResendIn] = useState(0);
+  // Dev/preview fallback: without an email provider the API returns the
+  // code inline so the reset can actually be completed — same as login.
+  const [devCode, setDevCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -67,7 +70,8 @@ function ForgotPassword() {
     setBusy(true);
     setStage('code');
     try {
-      await requestPasswordReset(email);
+      const result = await requestPasswordReset(email);
+      setDevCode(result.dev_code ?? null);
       setResendIn(RESEND_SECONDS);
       playSound('beep');
     } catch (err: unknown) {
@@ -127,7 +131,7 @@ function ForgotPassword() {
         <p className="auth-lede">
           Your new password is set. Log in with it — or with a one-time code — as usual.
         </p>
-        <Link className="button-link" to="/login-password">
+        <Link className="button-link" to="/login">
           Log in with a password
         </Link>
       </div>
@@ -202,6 +206,11 @@ function ForgotPassword() {
             <button type="submit" disabled={busy || code.length !== 6}>
               {busy && code.length === 6 ? 'Checking…' : 'Verify code'}
             </button>
+            {devCode && (
+              <p className="dev-code-hint">
+                Dev mode: your reset code is <strong>{devCode}</strong>
+              </p>
+            )}
             <p className="auth-switch">
               Didn't get it?{' '}
               {resendIn > 0 ? (
@@ -248,7 +257,11 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('returnTo') ?? '/dashboard';
-  const [mode, setMode] = useState<Mode>('login');
+  // Deep link support: /login-code?mode=forgot opens straight into the
+  // reset flow (the password page links there for "Forgot password?").
+  const [mode, setMode] = useState<Mode>(() =>
+    searchParams.get('mode') === 'forgot' ? 'forgot' : 'login',
+  );
   const [channel, setChannel] = useState<Channel>('email');
   const [step, setStep] = useState<Step>('input');
   // Signup hands over the address it just registered so the user never
@@ -425,8 +438,8 @@ export default function Login() {
         {step === 'input' ? (
           <form className="auth-card" onSubmit={handleRequestCode}>
             <span className="auth-brand">R:</span>
-            <h1>Log in to SmartSpend</h1>
-            <p className="auth-lede">One-time code, no password. Email, SMS or WhatsApp.</p>
+            <h1>Log in with a one-time code</h1>
+            <p className="auth-lede">Email, SMS or WhatsApp — no password needed.</p>
 
             <div className="channel-toggle" role="tablist" aria-label="Login method">
               {(Object.keys(CHANNEL_LABELS) as Channel[])
@@ -506,7 +519,7 @@ export default function Login() {
             <p className="auth-switch">
               New here? <Link to="/register">Create an account</Link>
               {' · '}
-              <Link to="/login-password">Use a password</Link>
+              <Link to="/login">Use a password</Link>
             </p>
           </form>
         ) : (

@@ -8,13 +8,15 @@ export interface User {
   created_at: string;
   login_count?: number;
   last_login_at?: string | null;
+  /** True while the session is an unclaimed throwaway guest account. */
+  is_guest?: boolean;
 }
 
 /** One row of the per-user sign-in audit trail (GET /api/me/logins/). */
 export interface LoginAuditEntry {
   login_count: number;
   last_login_at: string | null;
-  method: 'password' | 'email_code' | 'sms_code' | 'whatsapp_code' | 'apple';
+  method: 'password' | 'email_code' | 'sms_code' | 'whatsapp_code' | 'apple' | 'guest';
   created_at: string;
   ip: string | null;
   user_agent: string;
