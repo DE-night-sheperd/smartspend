@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SmartSpend Database ERD</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+  h1 { color: #38bdf8; margin-bottom: 4px; }
+  .subtitle { color: #94a3b8; margin-bottom: 24px; font-size: 14px; }
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+  }
+  .mermaid { background: #f8fafc; padding: 20px; border-radius: 8px; }
+  .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+  .legend-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; }
+  .legend-item h4 { margin: 0 0 6px 0; color: #38bdf8; font-size: 14px; }
+  .legend-item p { margin: 0; color: #cbd5e1; font-size: 12px; line-height: 1.5; }
+  .pk { color: #22c55e; font-weight: bold; }
+  .fk { color: #f59e0b; }
+  .conn-info { background: #065f46; border: 1px solid #10b981; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+  .conn-info code { background: #022c22; padding: 2px 6px; border-radius: 4px; color: #6ee7b7; }
+</style>
+</head>
+<body>
+  <h1>SmartSpend ERD Diagram</h1>
+  <div class="subtitle">Entity Relationship Diagram for the SmartSpend Personal Finance Platform — MySQL Schema</div>
+
+  <div class="conn-info">
+    <strong>Database Connection:</strong><br>
+    Engine: <code>MySQL / MariaDB</code> | Host: <code>127.0.0.1:3307</code> | Database: <code>smartspend</code> | User: <code>smartspend_user</code>
+  </div>
+
+  <div class="card">
+    <h2 style="color:#38bdf8; margin-top:0;">Entity Relationship Diagram</h2>
+    <div class="mermaid">
+erDiagram
+    USER ||--o{ RECEIPT : owns
+    USER ||--o{ LOYALTY_POINTS : "has points"
+    USER ||--o{ BUDGET_ALERT : "receives"
+    USER ||--o{ LOGIN_AUDIT : "audits"
+    USER ||--o{ LOGIN_CODE : "requests"
+    STORE ||--o{ RECEIPT : "appears on"
+    STORE ||--o{ LOYALTY_POINTS : "issues"
+    RECEIPT ||--|{ RECEIPT_ITEM : contains
+    RECEIPT ||--o{ LOYALTY_POINTS : "source of"
+    CATEGORY ||--o{ RECEIPT_ITEM : categorizes
+
+    USER {
+        UUID user_id PK
+        string email UK
+        string password
+        string first_name
+        string last_name
+        string phone
+        boolean is_guest
+        decimal monthly_budget_limit
+        int login_count
+        datetime last_login_at
+        text gemini_key_encrypted
+        datetime created_at
+    }
+
+    STORE {
+        bigint store_id PK
+        string store_name
+        string channel_type
+        datetime created_at
+    }
+
+    CATEGORY {
+        int category_id PK
+        string category_name UK
+        boolean is_essential
+    }
+
+    RECEIPT {
+        bigint receipt_id PK
+        UUID user_id FK
+        bigint store_id FK
+        date purchase_date
+        decimal total_amount
+        string source_type
+        string image_url
+        string receipt_image
+        string cashier_name
+        string branch_name
+        string slip_number
+        string payment_method
+        text original_text
+        boolean verified
+        datetime created_at
+    }
+
+    RECEIPT_ITEM {
+        bigint item_id PK
+        bigint receipt_id FK
+        int category_id FK
+        string item_name
+        decimal unit_price
+        int quantity
+        boolean is_impulse
+    }
+
+    LOYALTY_POINTS {
+        bigint points_id PK
+        UUID user_id FK
+        bigint store_id FK
+        bigint receipt_id FK,nullable
+        int points
+        string label
+        date expires_at,nullable
+        datetime created_at
+    }
+
+    BUDGET_ALERT {
+        bigint alert_id PK
+        UUID user_id FK
+        string kind
+        string period
+        datetime sent_at
+        string detail
+    }
+
+    LOGIN_CODE {
+        bigint id PK
+        string email IX
+        string code
+        datetime created_at
+        datetime expires_at
+        datetime consumed_at,nullable
+        smallint attempts
+        string request_ip,nullable
+        UUID request_id
+    }
+
+    LOGIN_AUDIT {
+        bigint id PK
+        UUID user_id FK
+        string method
+        datetime created_at IX
+        string ip,nullable
+        string user_agent
+    }
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="color:#38bdf8; margin-top:0;">Entity Reference</h2>
+    <div class="legend">
+      <div class="legend-item">
+        <h4><span class="pk">USER</span> (core_user)</h4>
+        <p>Registered users with email auth, budget settings, and optional encrypted Gemini API key. Uses UUID primary key (user_id).</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">STORE</span> (core_store)</h4>
+        <p>Retailers recognized on receipts. Physical store or Online ecommerce channel.</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">CATEGORY</span> (core_category)</h4>
+        <p>Spending categories (Groceries, Transport, Fast Food, etc.) with essential vs non-essential flag. 12 seeded by default.</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">RECEIPT</span> (core_receipt)</h4>
+        <p>Captured till slip per purchase. Linked to owning user and store. Stores slip identity (branch, cashier, slip #) for returns.</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">RECEIPT_ITEM</span> (core_receiptitem)</h4>
+        <p>Individual line items on a receipt. Linked to parent receipt and spending category. Impulse-purchase flag per item.</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">LOYALTY_POINTS</span> (core_loyaltypoints)</h4>
+        <p>Store loyalty points (e.g. Smart Shopper, ClubCard) extracted from receipts, with optional expiry date and voucher label.</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">BUDGET_ALERT</span> (core_budgetalert)</h4>
+        <p>Deduplication ledger for automated budget and points-expiry notifications (50%/80%/100% budget, 7-day/1-day points).</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">LOGIN_CODE</span> (core_logincode)</h4>
+        <p>Short-lived 6-digit OTP for passwordless email/SMS/WhatsApp login. Single-use, 10-min expiry, last-5 pruned per email.</p>
+      </div>
+      <div class="legend-item">
+        <h4><span class="pk">LOGIN_AUDIT</span> (core_loginaudit)</h4>
+        <p>Per-successful-signin audit trail across every channel: password, email/SMS/WhatsApp code, Apple, Guest. Includes IP + UA.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="color:#38bdf8; margin-top:0;">Relationship Summary</h2>
+    <ul style="color:#cbd5e1; line-height:2;">
+      <li><strong>USER → RECEIPT:</strong> 1-to-Many. A user owns many receipts; a receipt belongs to one user (CASCADE delete).</li>
+      <li><strong>STORE → RECEIPT:</strong> 1-to-Many. A store appears on many receipts; deleting a store is PROTECTED if receipts exist.</li>
+      <li><strong>RECEIPT → RECEIPT_ITEM:</strong> 1-to-Many. A receipt has many line items; deleting a receipt removes all items.</li>
+      <li><strong>CATEGORY → RECEIPT_ITEM:</strong> 1-to-Many. A category classifies many line items; deletion is PROTECTED.</li>
+      <li><strong>USER → LOYALTY_POINTS:</strong> 1-to-Many. Users accumulate points per store. (CASCADE on user delete).</li>
+      <li><strong>STORE → LOYALTY_POINTS:</strong> 1-to-Many. Store issues the points (PROTECTED).</li>
+      <li><strong>RECEIPT → LOYALTY_POINTS:</strong> 1-to-Many (optional). Points optionally linked to the source receipt they were extracted from (SET NULL).</li>
+      <li><strong>USER → BUDGET_ALERT:</strong> 1-to-Many. Deduplication ledger per user/period/kind (UniqueConstraint).</li>
+      <li><strong>USER → LOGIN_AUDIT:</strong> 1-to-Many. Full sign-in history per user (CASCADE).</li>
+      <li><strong>USER → LOGIN_CODE:</strong> Logical (no FK — codes are transient email-keyed before account lookup).</li>
+    </ul>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default', er: { useMaxWidth: false } });
+  </script>
+</body>
+</html>

@@ -144,10 +144,31 @@ if not DEBUG:
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
-# Defaults to SQLite for quick local dev. Point DATABASE_URL-style vars at
-# your Supabase Postgres instance for production (see .env.example).
+# Priority: MySQL (MYSQL_HOST set) > Postgres (POSTGRES_HOST set) > SQLite (default)
 
-if os.environ.get('POSTGRES_HOST'):
+if os.environ.get('MYSQL_HOST'):
+    try:
+        import pymysql
+        pymysql.install_as_MySQLdb()
+    except ImportError:
+        pass
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('MYSQL_DB', 'smartspend'),
+            'USER': os.environ.get('MYSQL_USER', 'smartspend_user'),
+            'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
+            'HOST': os.environ.get('MYSQL_HOST', '127.0.0.1'),
+            'PORT': os.environ.get('MYSQL_PORT', '3306'),
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            },
+        }
+    }
+    if os.environ.get('MYSQL_UNIX_SOCKET'):
+        DATABASES['default']['OPTIONS']['unix_socket'] = os.environ.get('MYSQL_UNIX_SOCKET')
+elif os.environ.get('POSTGRES_HOST'):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',

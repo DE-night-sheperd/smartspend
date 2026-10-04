@@ -1,0 +1,31 @@
+2026-10-04  6:57:17 0 [Note] Starting MariaDB 11.8.6-MariaDB-6 from Debian source revision 9bfea48ce1214cc4470f6f6f8a4e30352cef84e7 server_uid 3ku2oThZ2c3HBQKvKhxsN9HX1eU= as process 5
+2026-10-04  6:57:17 0 [Note] InnoDB: Compressed tables use zlib 1.3.2
+2026-10-04  6:57:17 0 [Note] InnoDB: Number of transaction pools: 1
+2026-10-04  6:57:17 0 [Note] InnoDB: Using crc32 + pclmulqdq instructions
+2026-10-04  6:57:17 0 [Note] InnoDB: Using io_uring
+2026-10-04  6:57:17 0 [Note] InnoDB: innodb_buffer_pool_size_max=128m, innodb_buffer_pool_size=128m
+2026-10-04  6:57:17 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-10-04  6:57:17 0 [Note] InnoDB: File system buffers for log disabled (block size=512 bytes)
+2026-10-04  6:57:17 0 [Note] InnoDB: End of log at LSN=45616
+2026-10-04  6:57:17 0 [Note] InnoDB: Opened 3 undo tablespaces
+2026-10-04  6:57:17 0 [Note] InnoDB: 128 rollback segments in 3 undo tablespaces are active.
+2026-10-04  6:57:17 0 [Note] InnoDB: Setting file './ibtmp1' size to 12.000MiB. Physically writing the file full; Please wait ...
+2026-10-04  6:57:17 0 [Note] InnoDB: File './ibtmp1' size is now 12.000MiB.
+2026-10-04  6:57:17 0 [Note] InnoDB: log sequence number 45616; transaction id 14
+2026-10-04  6:57:17 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-10-04  6:57:17 0 [Note] InnoDB: Loading buffer pool(s) from /home/de_night_shepherd/Desktop/smartspend/mysql_data/data/ib_buffer_pool
+2026-10-04  6:57:17 0 [Note] Plugin 'wsrep-provider' is disabled.
+2026-10-04  6:57:17 0 [Note] InnoDB: Buffer pool(s) load completed at 261004  6:57:17
+2026-10-04  6:57:18 0 [Note] Server socket created on IP: '127.0.0.1', port: '3307'.
+2026-10-04  6:57:18 0 [Note] mariadbd: Event Scheduler: Loaded 0 events
+2026-10-04  6:57:18 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '11.8.6-MariaDB-6 from Debian'  socket: '/home/de_night_shepherd/Desktop/smartspend/mysql_data/mysql.sock'  port: 3307  -- Please help get to 10k stars at https://github.com/MariaDB/Server
+2026-10-04  6:57:35 3 [Warning] Access denied for user 'root'@'localhost'
+2026-10-04  7:01:59 9 [Warning] Aborted connection 9 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:02:13 10 [Warning] Aborted connection 10 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:02:37 11 [Warning] Aborted connection 11 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:05:49 13 [Warning] Aborted connection 13 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:07:12 14 [Warning] Aborted connection 14 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:10:26 25 [Warning] Aborted connection 25 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:10:42 26 [Warning] Aborted connection 26 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-04  7:11:05 27 [Warning] Aborted connection 27 to db: 'smartspend' user: 'smartspend_user' host: 'localhost' (Got an error reading communication packets)
