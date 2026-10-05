@@ -110,10 +110,12 @@ step(5, "POST receipt (3 items + loyalty points) via API")
 s, d = http('POST', '/stores/', {'store_name': 'Game Sandton',
                                   'channel_type': 'Physical_Store'}, token=TOKEN)
 store_id = (isinstance(d, dict) and d.get('store_id')) or None
-# Don't fail if store exists — move on
+if not store_id:
+    from core.models import Store
+    existing_store = Store.objects.filter(store_name='Game Sandton').first()
+    store_id = existing_store.store_id if existing_store else 1
 payload = {
-    'store': store_id if store_id else (
-        Store.objects.first().store_id if (Store := _import_store_type()) else 1),
+    'store': store_id,
     'store_name': 'Game Sandton',
     'purchase_date': time.strftime('%Y-%m-%d'),
     'total_amount': '699.95',
@@ -130,7 +132,7 @@ payload = {
         {'category': 'Entertainment', 'item_name': 'HDMI Cable',
          'unit_price': '79.95', 'quantity': 1, 'is_impulse': False},
         {'category': 'Other',         'item_name': 'Surge Protector',
-         'unit_price': '120.00', 'quantity': 1, 'is_impulse': True},
+         'unit_price': '120.05', 'quantity': 1, 'is_impulse': True},
     ],
     'loyalty_points': [
         {'points': 700, 'label': 'Game MyCredit',
@@ -140,9 +142,6 @@ payload = {
 }
 
 
-def _import_store_type():
-    from core.models import Store
-    return Store
 payload['store'] = None  # use store_name for inline create
 s, rec = http('POST', '/receipts/', payload=payload, token=TOKEN)
 check(f"POST /receipts/ success (HTTP 200/201)", s in (200, 201),

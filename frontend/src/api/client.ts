@@ -16,14 +16,21 @@ import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 const isLocalhost =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 const envApiUrl = import.meta.env.VITE_API_BASE_URL;
-// Only trust the env var when it is a real URL — the managed platform can
-// wrap env values in an opaque runtime envelope, which must never become
-// the axios baseURL.
 const envApiUrlOk =
   typeof envApiUrl === 'string' && /^https?:\/\//.test(envApiUrl);
 
 function withTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;
+}
+
+/** Safety net: axios.combineURLs drops any path component on baseURL when the
+ *  requested URL starts with '/'. With our endpoints.ts stripped of leading
+ * '/' this shouldn't fire, but an interceptor keeps everyone safe if someone
+ * accidentally re-adds one. */
+function joinBase(base: string, url: string): string {
+  const urlNoLead = url.replace(/^\/+/, '');
+  const baseNoTrail = base.replace(/\/+$/, '');
+  return `${baseNoTrail}/${urlNoLead}`;
 }
 
 export const API_BASE_URL = withTrailingSlash(
@@ -34,20 +41,10 @@ export const API_BASE_URL = withTrailingSlash(
       : '/api',
 );
 
+export const api = axios.create({ baseURL: API_BASE_URL });
+
 const ACCESS_KEY = 'smartspend_access';
 const REFRESH_KEY = 'smartspend_refresh';
-
-/**
- * Fire-and-forget health ping: touching the API starts waking a suspended
- * server. Fired when the app loads AND from the auth pages' send buttons,
- * so the wake launches the moment a user commits to signing in. Never
- * throws; harmless when the server is already awake.
- */
-export function warmUpApi(): void {
-  void axios
-    .get(`${API_BASE_URL}auth/config/`, { timeout: 45_000 })
-    .catch(() => undefined);
-}
 
 export const tokenStore = {
   getAccess: () => localStorage.getItem(ACCESS_KEY),
@@ -62,7 +59,15 @@ export const tokenStore = {
   },
 };
 
-export const api = axios.create({ baseURL: API_BASE_URL });
+/**
+ * Fire-and-forget health ping: touching the API starts waking a suspended
+ * server. Fired when the app loads AND from the auth pages' send buttons,
+ * so the wake launches the moment a user commits to signing in. Never
+ * throws; harmless when the server is already awake.
+ */
+export function warmUpApi(): void {
+  void api.get('auth/config/', { timeout: 45_000 }).catch(() => undefined);
+}
 
 // The API host can briefly return 502/503/504 while its server wakes up
 // (free tiers suspend idle instances; the first request itself starts the
@@ -77,6 +82,11 @@ function delay(ms: number) {
 }
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (config.url && !/^https?:\/\//i.test(config.url)) {
+    const base = (config.baseURL as string | undefined) ?? (api.defaults.baseURL as string) ?? API_BASE_URL;
+    config.url = joinBase(base, config.url);
+    config.baseURL = undefined;
+  }
   const access = tokenStore.getAccess();
   if (access) {
     config.headers.Authorization = `Bearer ${access}`;
@@ -92,7 +102,7 @@ async function refreshAccessToken(): Promise<string | null> {
   const refresh = tokenStore.getRefresh();
   if (!refresh) return null;
   try {
-    const { data } = await axios.post(`${API_BASE_URL}auth/refresh/`, { refresh });
+    const { data } = await api.post('auth/refresh/', { refresh });
     tokenStore.setTokens(data.access, refresh);
     return data.access as string;
   } catch {

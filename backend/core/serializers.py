@@ -170,6 +170,13 @@ class StoreSerializer(serializers.ModelSerializer):
         model = Store
         fields = ['store_id', 'store_name', 'channel_type', 'created_at']
         read_only_fields = ['store_id', 'created_at']
+        validators = [
+            serializers.UniqueTogetherValidator(
+                queryset=Store.objects.all(),
+                fields=['store_name', 'channel_type'],
+                message='A store with this name and channel already exists.',
+            )
+        ]
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -220,7 +227,7 @@ class ReceiptItemSerializer(serializers.ModelSerializer):
 class ReceiptSerializer(serializers.ModelSerializer):
     items = ReceiptItemSerializer(many=True, required=False)
     store_name = serializers.CharField(source='store.store_name', read_only=True)
-    store = serializers.PrimaryKeyRelatedField(queryset=Store.objects.all(), required=False)
+    store = serializers.PrimaryKeyRelatedField(queryset=Store.objects.all(), required=False, allow_null=True)
     image_url = serializers.SerializerMethodField()
 
     class Meta:

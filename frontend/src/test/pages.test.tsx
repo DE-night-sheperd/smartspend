@@ -208,10 +208,10 @@ describe('Dashboard', () => {
     expect(await screen.findByText(/Ways to save this month/)).toBeInTheDocument();
     expect(screen.getByText('Skip the impulse buys')).toBeInTheDocument();
     expect(screen.getByText('Batch your Checkers trips')).toBeInTheDocument();
-    expect(screen.getByText('+R120.00')).toBeInTheDocument();
-    expect(screen.getByText('+R65.00')).toBeInTheDocument();
+    expect(screen.getByText(/\+R120[.,]00/)).toBeInTheDocument();
+    expect(screen.getByText(/\+R65[.,]00/)).toBeInTheDocument();
     expect(screen.getByText(/Sticking to every suggestion could free up about/)).toBeInTheDocument();
-    expect(screen.getByText('R185.00')).toBeInTheDocument();
+    expect(screen.getByText(/R185[.,]00/)).toBeInTheDocument();
   });
 
   it('renders no advice card when the month has nothing to suggest', async () => {

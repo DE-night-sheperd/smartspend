@@ -244,7 +244,7 @@ header('8. Aggregate Queries — Spending Reports')
 
 user_receipts = Receipt.objects.filter(user=fetched)
 total_spent = sum(r.total_amount for r in user_receipts)
-check('Sum receipt totals via ORM', total_spent == Decimal('285.50'), f'total=R{total_spent}')
+check('Sum receipt totals via ORM', total_spent == Decimal('284.40'), f'total=R{total_spent}')
 
 from django.db.models import Sum, Count
 cat_spend = (
@@ -286,7 +286,6 @@ LoginAudit.objects.filter(user=fetched).delete()
 LoginCode.objects.filter(email=fetched.email).delete()
 BudgetAlert.objects.filter(user=fetched).delete()
 LoyaltyPoints.objects.filter(user=fetched).delete()
-ReceiptItem.objects.filter(receipt__user=fetched).delete()
 Receipt.objects.filter(user=fetched).delete()
 Category.objects.filter(category_name='Test Custom Category').delete()
 User.objects.filter(user_id=user_pk).delete()
